@@ -4,14 +4,44 @@ Trading Card Game sub-project of [Hardread](../). Plans and work for building RL
 
 Currently: **scaffolding** — this folder is the home for TCG AI work, structured around the [Pokémon TCG AI Battle Challenge](#pokémon-tcg-ai-battle-challenge) below.
 
+## The official simulator: `cabt` engine
+
+The challenge runs on the **`cabt` engine** (v0.1.0), built and documented by Matsuo Institute (co-organizer). This is the canonical environment — submissions to the Simulation category must use it via Kaggle's `kaggle_environments` package.
+
+- **Docs**: https://matsuoinstitute.github.io/cabt/
+- **Source**: closed (Matsuo Institute proprietary). Engine is exposed through `kaggle_environments.make("cabt", …)`.
+- **Legal-move guarantee**: per the Kaggle overview, *"The engine only ever presents legal moves."* The agent picks indices into `obs["select"]["option"]` — the engine handles legality.
+- **API surface**:
+  - `battle_start(deck0, deck1)` → `(Observation | None, StartData)`
+  - `battle_select(select_list)` → new `Observation`
+  - `battle_finish()` / `visualize_data()`
+  - `all_card_data()`, `all_attack()` (card metadata)
+  - `search_begin()`, `search_step()`, `search_end()`, `search_release()` (state-search helpers)
+- **Observation shape**: `Observation = { logs, current, select }`
+  - `current` (the State) has `players`, `stadium`, turn count, first/second, supporter/stadium/energy usage, retreat state, game results
+  - `players[i]` is a `PlayerState` with `active`, `bench`, `hand`, `prize`, `deckCount`, `discard`, `handCount`, `benchMax`, status flags (poisoned/burned/asleep/paralyzed/confused)
+  - `select` is the legal-action surface — `select.option` is the list, `select.maxCount` is how many to pick
+- **Agent signature**:
+  ```python
+  import random
+  def agent(obs_dict: dict) -> list[int]:
+      return random.sample(
+          list(range(len(obs_dict["select"]["option"]))),
+          obs_dict["select"]["maxCount"],
+      )
+  ```
+- **Deck format**: 60 card IDs in a CSV, one per line. Card IDs obtainable via `all_card_data()`.
+
+### Notes
+- The Kaggle overview flags a small number of differences between official Pokémon TCG rules and the simulator's behavior — check the Kaggle competition rules page for the exact list.
+- Engine copyright: © Pokémon/Nintendo/Creatures/GAME FREAK/HEROZ, Inc./Matsuo Institute, Inc.
+
 ## Roadmap (planned)
 - Ingest the Kaggle card-pool dataset (Card Data CSVs, EN + JP) and normalize to a single schema
-- Stand up a TCG simulator harness. Candidates:
-  - [`axpendix/tcgone-engine-contrib`](https://github.com/axpendix/tcgone-engine-contrib) (full card implementations)
-  - [`AngelFireLA/PokemonTCGP-BattleSimulator`](https://github.com/AngelFireLA/PokemonTCGP-BattleSimulator) (Python bot/AI harness)
-  - [`apmnt/poke-pocket-sim`](https://github.com/apmnt/poke-pocket-sim) (TCG Pocket variant)
-- Wire into a `gymnasium`/`OpenEnv`-style reset/step API that mirrors the VGC sub-project's interface
-- Build a baseline agent (heuristic + small RL) before attempting LLM-driven methods
+- Build a local harness around the `cabt` engine for self-play (requires a Kaggle-compatible environment or a wheel of the engine)
+- Wrap the `cabt` API in a thin `gymnasium`/`OpenEnv`-style `reset()` / `step()` interface that mirrors the VGC sub-project's surface
+- Baseline agent: heuristic + small RL (PPO/SAC) before attempting LLM-driven methods
+- Long term: leverage the **daily top-rated episode exports** from the Kaggle competition forums as an offline RL / behavior-cloning dataset
 
 ---
 
