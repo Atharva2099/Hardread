@@ -166,6 +166,58 @@ The Dockerfile builds a lightweight Gradio app that replays pre-recorded model b
 docker build -t hardread . && docker run -p 7860:7860 hardread
 ```
 
+## PokéAgent Challenge — Track 1: Competitive Battling
+
+The VGC/ sub-project aims to participate in **[PokéAgent Challenge Track 1](https://pokeagent.github.io/track1.html)**, a NeurIPS 2025 competition built around competitive Pokémon battles on Pokémon Showdown.
+
+- **Discord**: https://discord.gg/E2DuX5FWF7
+- **Site**: https://pokeagent.github.io/track1.html
+- **Paper**: [The PokéAgent Challenge: Competitive and Long-Context Learning at Scale (arXiv 2603.15563)](https://arxiv.org/abs/2603.15563)
+- **Organizers**: Seth Karten (Princeton), Jake Grigsby (UT Austin), Stephanie Milani (NYU/JHU), Kiran Vodrahalli (Google DeepMind), Amy Zhang (UT Austin), Fei Fang (CMU), Yuke Zhu (UT Austin), Chi Jin (Princeton)
+- **Gold sponsor**: Google DeepMind
+
+### Tracks & formats
+The competition supports Gen1OU, Gen2OU, Gen3OU, Gen4OU, Gen9OU, and Gen9 VGC Regulation I. Bracket stages use **Gen1OU and Gen9OU single-elimination**, best-of-99 battles. Agents pick their own teams and may change teams between battles.
+
+### Timeline (2025)
+- **Free play** (Jul 11 – Oct 12): practice ladder, exhibitions, practice tournaments
+- **Qualifying window** (Oct 13 – Oct 26): top 8 (or 16) teams by Elo qualify
+- **Tournament stage** (Oct 29 →): bracket play for cash + GCP credits
+- **Final submission deadline**: Nov 15, 2025
+- **Winners presented at NeurIPS 2025** (San Diego, Dec 2025)
+
+### Prizes (Track 1)
+Each of the Gen1OU and Gen9OU brackets awards **$3,000 + 1,000 GCP** separately:
+- All qualifying teams: 125 GCP
+- 1st: $1,100
+- 2nd: $800
+- 3rd–4th: $350
+- 5th–8th: $100
+
+Plus Judge's Choice awards (up to 2 projects × $100 + 400 GCP). Total Track 1 pool ≥ $6,000 + $3,000 GCP.
+
+### Starter kits
+- [`metamon`](https://github.com/UT-Austin-RPL/metamon) — RL on human replays
+- [`pokechamp`](https://github.com/sethkarten/pokechamp) — LLM-agents, search, and scaffolding
+- [`poke-env`](https://github.com/hsahovic/poke-env) — Python interface to Showdown
+
+### Datasets
+- [`pokechamp`](https://huggingface.co/datasets/milkkarten/pokechamp) — 2M battles across 39+ formats
+- [`metamon-raw-replays`](https://huggingface.co/datasets/jakegrigsby/metamon-raw-replays) — 1.8M battles, 2014-2025
+- [`metamon-parsed-replays`](https://huggingface.co/datasets/jakegrigsby/metamon-parsed-replays) — 3.5M+ parsed trajectories
+- [`metamon-teams`](https://huggingface.co/datasets/jakegrigsby/metamon-teams), [`metamon-usage-stats`](https://huggingface.co/datasets/jakegrigsby/metamon-usage-stats)
+
+### How to enter
+1. Join the [Discord](https://discord.gg/E2DuX5FWF7) and register a Showdown username prefixed with `PAC` on the [PokéAgent Showdown server](http://pokeagentshowdown.com.insecure.psim.us).
+2. Deploy your agent using `poke-env` (or the starter kits) with the provided server config:
+   ```python
+   PokeAgentServerConfiguration = ServerConfiguration(
+       "wss://pokeagentshowdown.com/showdown/websocket",
+       "https://play.pokemonshowdown.com/action.php?",
+   )
+   ```
+3. Climb the ranked ladder to qualify.
+
 ## License
 
 MIT
