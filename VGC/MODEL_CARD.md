@@ -12,7 +12,7 @@ datasets: []
 pipeline_tag: text-generation
 ---
 
-# OpenEnv-WolfeClick: GRPO-Trained Pokemon Battler
+# Hardread: GRPO-Trained Pokemon Battler
 
 LoRA adapters for [Qwen3-4B-Instruct](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) trained with GRPO to play competitive Pokemon Showdown battles.
 
@@ -21,7 +21,7 @@ LoRA adapters for [Qwen3-4B-Instruct](https://huggingface.co/Qwen/Qwen3-4B-Instr
 These adapters are trained on real rollout trajectories collected from live Pokemon Showdown battles (gen4randombattle format). The training pipeline:
 
 1. **JSON warm-up SFT** — teaches the model to output valid `{"action": "move"|"switch", "choice": "..."}` JSON
-2. **GRPO training** — optimizes the policy using shaped rewards from the OpenEnv-WolfeClick environment
+2. **GRPO training** — optimizes the policy using shaped rewards from the Hardread environment
 
 The environment provides dense reward signals including damage dealt/taken, knockouts, healing, setup moves, type effectiveness, and penalties for illegal actions.
 
@@ -78,6 +78,6 @@ print(tokenizer.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_to
 
 ## Links
 
-- **Environment repo:** [github.com/Atharva2099/OpenEnv-WolfeClick](https://github.com/Atharva2099/OpenEnv-WolfeClick)
-- **Live demo:** [HF Space](https://huggingface.co/spaces/Atharva2099/OpenEnv-WolfeClick)
+- **Environment repo:** [github.com/Atharva2099/Hardread](https://github.com/Atharva2099/Hardread)
+- **Live demo:** [HF Space](https://huggingface.co/spaces/Atharva2099/Hardread)
 - **Training notebook:** `trainer.ipynb` in the environment repo

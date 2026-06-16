@@ -7,7 +7,7 @@ from openenv.core.env_server import Action, Observation, State
 
 
 @dataclass
-class WolfeClickAction(Action):
+class HardreadAction(Action):
     """Single step action for the environment.
 
     This wraps the constrained JSON interface already used by the local env:
@@ -19,7 +19,7 @@ class WolfeClickAction(Action):
 
 
 @dataclass
-class WolfeClickObservation(Observation):
+class HardreadObservation(Observation):
     """Markdown battle state plus metadata."""
 
     state_markdown: str
@@ -31,7 +31,7 @@ class WolfeClickObservation(Observation):
     metadata: Dict[str, Any] | None = None
 
 
-class WolfeClickState(State):
+class HardreadState(State):
     """Thin wrapper around the core State model."""
 
     # We rely on the base State fields (episode_id, step_count).

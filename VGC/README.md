@@ -1,5 +1,5 @@
 ---
-title: OpenEnv-WolfeClick Environment
+title: Hardread Environment
 emoji: 🎮
 colorFrom: blue
 colorTo: gray
@@ -12,9 +12,9 @@ tags:
  - multi-agent
 ---
 
-# OpenEnv-WolfeClick
+# Hardread
 
-[![HF Space](https://img.shields.io/badge/HF%20Space-Live%20Demo-blue)](https://huggingface.co/spaces/Atharva2099/OpenEnv-WolfeClick)
+[![HF Space](https://img.shields.io/badge/HF%20Space-Live%20Demo-blue)](https://huggingface.co/spaces/Atharva2099/Hardread)
 [![Model](https://img.shields.io/badge/HF%20Model-Weights-orange)](https://huggingface.co/Atharva2099/openenv-smogon-rl)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 
@@ -22,13 +22,13 @@ An [OpenEnv](https://github.com/openenv)-compatible environment for training LLM
 
 Competitive Pokemon has hidden information, constrained legal actions, long-term resource tradeoffs, and an active opponent. This repo turns that setting into a trainable RL environment with a `reset()` / `step()` loop, shaped rewards, an OpenEnv server wrapper, and a GRPO training pipeline.
 
-> **[Try the live demo](https://huggingface.co/spaces/Atharva2099/OpenEnv-WolfeClick)** — watch a GRPO-trained model play a full battle turn by turn.
+> **[Try the live demo](https://huggingface.co/spaces/Atharva2099/Hardread)** — watch a GRPO-trained model play a full battle turn by turn.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/Atharva2099/OpenEnv-WolfeClick.git
-cd OpenEnv-WolfeClick
+git clone https://github.com/Atharva2099/Hardread.git
+cd Hardread
 pip install -e .
 
 # Run a battle with random actions (needs local Pokemon Showdown on port 8000)
@@ -149,7 +149,7 @@ The environment follows the OpenEnv standard. Config:
 ```yaml
 # openenv.yaml
 spec_version: 1
-name: openenv-wolfeclick
+name: hardread
 type: space
 runtime: fastapi
 app: env.server.app:app
@@ -163,7 +163,7 @@ Server package: `env/server/app.py`, `env/server/environment.py`, `env/models.py
 The Dockerfile builds a lightweight Gradio app that replays pre-recorded model battles:
 
 ```bash
-docker build -t wolfeclick . && docker run -p 7860:7860 wolfeclick
+docker build -t hardread . && docker run -p 7860:7860 hardread
 ```
 
 ## License

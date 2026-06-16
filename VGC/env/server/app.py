@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from openenv.core.env_server import create_app
 
-from env.models import WolfeClickAction, WolfeClickObservation
-from env.server.environment import WolfeClickEnvironment
+from env.models import HardreadAction, HardreadObservation
+from env.server.environment import HardreadEnvironment
 
 app = create_app(
-    WolfeClickEnvironment,
-    WolfeClickAction,
-    WolfeClickObservation,
-    env_name="openenv-wolfeclick",
+    HardreadEnvironment,
+    HardreadAction,
+    HardreadObservation,
+    env_name="hardread",
 )
 
 

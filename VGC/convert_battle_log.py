@@ -108,7 +108,7 @@ def convert_battle(raw: dict) -> dict:
 
     return {
         "meta": {
-            "title": "OpenEnv-WolfeClick Replay",
+            "title": "Hardread Replay",
             "model": raw.get("model"),
             "format": raw.get("format"),
             "outcome": raw.get("outcome"),

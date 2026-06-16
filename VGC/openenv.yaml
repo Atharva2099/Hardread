@@ -1,5 +1,5 @@
 spec_version: 1
-name: openenv-wolfeclick
+name: hardread
 type: space
 runtime: fastapi
 app: env.server.app:app

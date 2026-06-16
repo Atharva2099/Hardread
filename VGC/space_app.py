@@ -13,7 +13,7 @@ STATIC_DIR = ROOT / "static"
 BATTLE_LOGS_DIR = ROOT / "battle_logs"
 REPLAY_PATH = BATTLE_LOGS_DIR / "replay_battle.json"
 
-app = FastAPI(title="OpenEnv-WolfeClick")
+app = FastAPI(title="Hardread")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

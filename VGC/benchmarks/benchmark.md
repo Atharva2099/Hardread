@@ -1,6 +1,6 @@
 # Benchmark Plan
 
-This file defines the benchmark protocol for OpenEnv-WolfeClick and records the results I will use in the hackathon submission.
+This file defines the benchmark protocol for Hardread and records the results I will use in the hackathon submission.
 
 ## Goal
 
@@ -22,10 +22,10 @@ This is the fairest comparison for this project because:
 ### Environment
 
 - battle format: `gen4randombattle`
-- environment code: [`/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/src/smogon_rl/openenv_sync_env.py`](/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/src/smogon_rl/openenv_sync_env.py)
-- reward source: [`/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/src/smogon_rl/reward.py`](/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/src/smogon_rl/reward.py)
-- state formatter: [`/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/src/smogon_rl/state_formatter.py`](/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/src/smogon_rl/state_formatter.py)
-- action validation: [`/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/src/smogon_rl/action_space.py`](/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/src/smogon_rl/action_space.py)
+- environment code: [`/Users/atharva/Desktop/Projects/Hardread/src/smogon_rl/openenv_sync_env.py`](/Users/atharva/Desktop/Projects/Hardread/src/smogon_rl/openenv_sync_env.py)
+- reward source: [`/Users/atharva/Desktop/Projects/Hardread/src/smogon_rl/reward.py`](/Users/atharva/Desktop/Projects/Hardread/src/smogon_rl/reward.py)
+- state formatter: [`/Users/atharva/Desktop/Projects/Hardread/src/smogon_rl/state_formatter.py`](/Users/atharva/Desktop/Projects/Hardread/src/smogon_rl/state_formatter.py)
+- action validation: [`/Users/atharva/Desktop/Projects/Hardread/src/smogon_rl/action_space.py`](/Users/atharva/Desktop/Projects/Hardread/src/smogon_rl/action_space.py)
 
 ### Policy checkpoints
 
@@ -90,7 +90,7 @@ These are the primary metrics I care about:
 
 ## Benchmark script
 
-Use [`/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/benckmarks/benchmark.py`](/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/benckmarks/benchmark.py) to run the benchmark.
+Use [`/Users/atharva/Desktop/Projects/Hardread/benckmarks/benchmark.py`](/Users/atharva/Desktop/Projects/Hardread/benckmarks/benchmark.py) to run the benchmark.
 
 Before running it, edit the `CHECKPOINTS` list in that script so it points to:
 
@@ -100,10 +100,10 @@ Before running it, edit the `CHECKPOINTS` list in that script so it points to:
 Then run:
 
 ```bash
-python3 /Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/benckmarks/benchmark.py
+python3 /Users/atharva/Desktop/Projects/Hardread/benckmarks/benchmark.py
 ```
 
-The script writes a Markdown table to [`/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/benckmarks/latest_results.md`](/Users/atharva/Desktop/Projects/OpenEnv-WolfeClick/benckmarks/latest_results.md).
+The script writes a Markdown table to [`/Users/atharva/Desktop/Projects/Hardread/benckmarks/latest_results.md`](/Users/atharva/Desktop/Projects/Hardread/benckmarks/latest_results.md).
 
 ## Results table
 

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "OpenEnv-WolfeClick Replay",
+    "title": "Hardread Replay",
     "model": "Qwen/Qwen3-4B-Instruct-2507 + LoRA grpo-qwen3-4b-run3",
     "format": "gen4randombattle",
     "outcome": "won",

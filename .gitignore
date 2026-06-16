@@ -18,4 +18,5 @@ venv/
 # IDE / OS
 .idea/
 .DS_Store
-WolfeClick
+Hardread
+.claude_session
