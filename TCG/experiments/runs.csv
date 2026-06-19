@@ -1,0 +1,4 @@
+date,git_branch,config,simulator_version,agent_version,n_games,win_rate,avg_steps,runtime,output_path,notes
+2026-06-16 22:51:49,main,baseline.yaml,cabt,random,10,,45.6,3.0,outputs/logs/results.json,Kaggle v6: random baseline with sample deck
+2026-06-18 00:00:00,main,bandit.yaml,cabt,bandit-v1,10,0.2,70.8,5.0,outputs/logs/results.json,Kaggle v14: bandit self-play (p0 vs p1, seeds 42/100). p0 win 2/10. agent learns within-game (n_arms/up to 128 updates). no errors.
+2026-06-19 10:35:00,main,docker_eval,cg,bandit-v1,100,0.24,50.3,8.1,outputs/logs/docker_results.json,Local Docker eval via cg package (QEMU x86). Bandit vs bandit self-play. ~81ms/game.

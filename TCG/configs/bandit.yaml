@@ -1,0 +1,21 @@
+agent:
+  name: bandit-v1
+  type: BanditAgent
+  alpha: 0.1
+  epsilon: 0.1
+  hp_weight: 0.01
+  seed: 42
+
+evaluation:
+  n_games: 10
+  max_steps_per_game: 2000
+  seed: 42
+  opponent: random
+
+deck:
+  size: 60
+  source: Data/EN_Card_Data.csv
+
+simulator:
+  name: cabt
+  debug: false

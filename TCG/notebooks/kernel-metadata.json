@@ -1,0 +1,13 @@
+{
+  "id": "",
+  "title": "Hardread TCG Baseline",
+  "code_file": "kaggle_runner.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "competition_sources": ["pokemon-tcg-ai-battle"],
+  "dataset_sources": [],
+  "keywords": []
+}

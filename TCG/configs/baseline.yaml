@@ -1,0 +1,17 @@
+agent:
+  name: random
+  type: RandomAgent
+
+evaluation:
+  n_games: 10
+  max_steps_per_game: 2000
+  seed: 42
+
+deck:
+  n_card_ids: 2103
+  size: 60
+  source: Data/EN_Card_Data.csv
+
+simulator:
+  name: cabt
+  debug: false

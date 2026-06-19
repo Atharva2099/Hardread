@@ -20,3 +20,9 @@ venv/
 .DS_Store
 Hardread
 .claude_session
+
+# Large data files — download from Kaggle, don't commit
+Data/*.pdf
+
+# Generated outputs
+TCG/outputs/

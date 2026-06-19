@@ -11,7 +11,14 @@ The challenge runs on the **`cabt` engine** (v0.1.0), built and documented by Ma
 - **Docs**: https://matsuoinstitute.github.io/cabt/
 - **Source**: closed (Matsuo Institute proprietary). Engine is exposed through `kaggle_environments.make("cabt", …)`.
 - **Legal-move guarantee**: per the Kaggle overview, *"The engine only ever presents legal moves."* The agent picks indices into `obs["select"]["option"]` — the engine handles legality.
-- **API surface**:
+- **Kaggle `Environment` usage**:
+  ```python
+  from kaggle_environments import make
+
+  env = make("cabt", configuration={"decks": [deck0, deck1]})
+  env.run([agent, agent])
+  ```
+- **Lower-level engine API** (exposed inside the cabt engine):
   - `battle_start(deck0, deck1)` → `(Observation | None, StartData)`
   - `battle_select(select_list)` → new `Observation`
   - `battle_finish()` / `visualize_data()`
