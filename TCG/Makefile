@@ -43,6 +43,14 @@ local-eval:
 	  python:3.11-slim \
 	  python scripts/docker_eval.py --n $$n --agent $$a
 
+## eval-bc — per-matchup eval of BC neural agent vs rule-based bots (Docker)
+eval-bc:
+	@test -n "$(WEIGHTS)" || (echo "Usage: make eval-bc WEIGHTS=outputs/logs/bcppo/weights/bc.npz N=20" && exit 1)
+	docker run --rm --platform linux/amd64 \
+	  -v $(PWD):/app -w /app \
+	  python:3.11-slim \
+	  bash -c "pip install -q numpy && python scripts/eval_neural_vs_bots.py --weights $(WEIGHTS) --n $(or $(N),20) --opponent $(or $(OPPONENT),heuristic) --neural-deck $(or $(NEURAL_DECK),Lucario)"
+
 ## Package
 package:
 	mkdir -p outputs/submissions && cp $(NOTEBOOK) outputs/submissions/submission_v1.ipynb && echo "Packaged: outputs/submissions/submission_v1.ipynb"
