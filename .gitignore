@@ -23,6 +23,8 @@ Hardread
 
 # Large data files — download from Kaggle, don't commit
 Data/*.pdf
+TCG/Data/*.pdf
+**/Data/*.pdf
 
 # Generated outputs
 TCG/outputs/

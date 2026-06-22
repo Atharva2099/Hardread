@@ -98,6 +98,22 @@ TCG/
   * pull outputs
   * submit only when explicitly instructed
 
+### Kaggle Kernel Rules (CRITICAL)
+
+* **Gate every phase behind a boolean flag** at the top of the notebook:
+  ```python
+  RUN_PHASE_1 = True   # replay parsing
+  RUN_PHASE_2 = True   # featurizer (no-op if already imported)
+  RUN_PHASE_3 = True   # BC training
+  RUN_PHASE_4 = False  # PPO self-play
+  RUN_PHASE_5 = False  # eval + submit
+  ```
+  Each phase cell starts with `if not RUN_PHASE_N: return/continue`.
+* **Never push a notebook with untested phases enabled.** Comment out or flag-off everything except the single phase being tested.
+* **Kaggle has no kill switch** — `kaggle kernels push` auto-runs and cannot be cancelled via CLI or UI. The only way to stop a runaway kernel is to delete it (`kaggle kernels delete`), which nukes the kernel entirely.
+* **Before pushing**, confirm with the user exactly which phase(s) should run.
+* **After a run completes**, pull outputs immediately — Kaggle may garbage-collect `/kaggle/working/` between sessions.
+
 ## Local-First Workflow
 
 Always follow this order:

@@ -2,11 +2,14 @@ SHELL := bash
 
 KAGGLE_USERNAME := $(shell kaggle config view 2>/dev/null | python3 -c "import sys; print(next((l.split()[-1] for l in sys.stdin if l.startswith('- username:')), 'atharva2099'))")
 KERNEL_SLUG := hardread-tcg-baseline
+BCPPO_SLUG := hardread-tcg-bc-ppo
 NOTEBOOK := notebooks/kaggle_runner.ipynb
+BCPPO_NOTEBOOK := notebooks/kaggle_bc_ppo.ipynb
 DECK := configs/starter_deck.csv
 PUSH_DIR := /tmp/tcg-kaggle-push
+BCPPO_PUSH_DIR := /tmp/tcg-bcppo-push
 
-.PHONY: setup data smoke eval configs-check local-eval package kaggle-push kaggle-output submit
+.PHONY: setup data smoke eval configs-check local-eval package kaggle-push kaggle-output submit kaggle-push-bcppo kaggle-output-bcppo
 
 ## Setup
 setup:
@@ -56,6 +59,18 @@ kaggle-push: smoke
 ## kaggle-output — pull latest output from Kaggle
 kaggle-output:
 	mkdir -p outputs/logs && kaggle kernels output $(KAGGLE_USERNAME)/$(KERNEL_SLUG) -p outputs/logs/ 2>&1 && echo "Output pulled to outputs/logs/"
+
+## kaggle-push-bcppo — push the BC+PPO notebook to Kaggle and run
+kaggle-push-bcppo:
+	rm -rf $(BCPPO_PUSH_DIR) && mkdir -p $(BCPPO_PUSH_DIR) && \
+	cp $(BCPPO_NOTEBOOK) $(BCPPO_PUSH_DIR)/ && \
+	cp notebooks/kernel-metadata-bc-ppo.json $(BCPPO_PUSH_DIR)/kernel-metadata.json && \
+	python3 -c "import json; md=json.load(open('$(BCPPO_PUSH_DIR)/kernel-metadata.json')); md['id']='$(KAGGLE_USERNAME)/$(BCPPO_SLUG)'; json.dump(md, open('$(BCPPO_PUSH_DIR)/kernel-metadata.json','w'), indent=2); print(f'Kernel ID: {md[\"id\"]}')" && \
+	kaggle kernels push -p $(BCPPO_PUSH_DIR) 2>&1
+
+## kaggle-output-bcppo — pull latest output from the BC+PPO notebook
+kaggle-output-bcppo:
+	mkdir -p outputs/logs && kaggle kernels output $(KAGGLE_USERNAME)/$(BCPPO_SLUG) -p outputs/logs/ 2>&1 && echo "Output pulled to outputs/logs/"
 
 ## submit — submit the pushed kernel to the competition
 submit:

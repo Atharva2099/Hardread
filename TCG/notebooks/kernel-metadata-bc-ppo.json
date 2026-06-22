@@ -1,0 +1,18 @@
+{
+  "id": "",
+  "title": "hardread-tcg-bc-ppo",
+  "code_file": "kaggle_bc_ppo.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "competition_sources": ["pokemon-tcg-ai-battle"],
+  "dataset_sources": [
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-17",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-18",
+    "kaggle/pokemon-tcg-ai-battle-episodes-index",
+    "atharvawalawalkar/hardread-tcg-src"
+  ],
+  "keywords": []
+}
