@@ -18,7 +18,10 @@ Step 0 is the deck-selection phase (select=None, action=60 card IDs).
 Steps 1+ are game decisions; only the active player has a non-empty action.
 
 No per-episode Elo or deck identity is recorded in the JSON. Filtering options:
-  - winner_only=True: extract pairs only from the winning player's moves
+  - winner_only=True: extract pairs only from the winning player's moves (pure BC)
+  - winner_only=False: extract both players' moves, each tagged with outcome
+    (+1.0 winner, -1.0 loser, 0.0 draw). Draw pairs (outcome==0) are dropped at
+    featurize time since they carry no learning signal under unlikelihood training.
   - agent_names: set of agent names to include (cross-ref with leaderboard for Elo)
 """
 
@@ -49,22 +52,34 @@ def extract_pairs(
     winner_only: bool = False,
     agent_names: Optional[Set[str]] = None,
     deck_id: int = 0,
-) -> List[Tuple[dict, List[int], int]]:
-    """Extract (obs_dict, action_indices, player_index) pairs from one episode.
+    episode_id: int = 0,
+) -> List[Tuple[dict, List[int], int, float, int]]:
+    """Extract (obs_dict, action_indices, player_index, outcome, episode_id) pairs.
 
     Args:
       episode: parsed episode dict
-      winner_only: if True, only extract from the winning player's decisions
-      agent_names: if set, only extract from agents whose name is in this set
+      winner_only: if True, only extract from the winning player's decisions (legacy pure-BC mode)
+      agent_names: set of agent names to include (cross-ref with leaderboard for Elo)
       deck_id: deck identity tag (0=unknown, since replays don't record decks)
+      episode_id: stable group id used for episode-level train/val split in train_bc.
+        Defaults to the EpisodeId from episode info when 0/not provided.
 
     Returns:
-      list of (obs_dict, action, player_idx) tuples where obs_dict.select is not None
+      list of (obs_dict, action, player_idx, outcome, episode_id) tuples where
+      obs_dict.select is not None. outcome is +1.0 for the winning player's moves,
+      -1.0 for the losing player's, 0.0 for draws.
     """
     steps = episode.get("steps") or []
     rewards = episode.get("rewards") or [0, 0]
     info = episode.get("info") or {}
     team_names = info.get("TeamNames") or []
+
+    # Resolve a stable group id for episode-level splitting. Prefer the Kaggle
+    # EpisodeId; fall back to the caller-supplied episode_id (e.g. a per-file
+    # counter used by write_shards when EpisodeId is missing).
+    eid = info.get("EpisodeId")
+    if eid is None:
+        eid = episode_id
 
     # Determine winner
     winner = -1
@@ -87,7 +102,7 @@ def extract_pairs(
     else:
         relevant_players = {0, 1}
 
-    # If winner_only, narrow to the winning player
+    # If winner_only, narrow to the winning player (legacy pure-BC signal)
     if winner_only and winner >= 0:
         relevant_players = {winner}
 
@@ -113,19 +128,35 @@ def extract_pairs(
             opts = sel.get("option") or []
             if any(not (0 <= i < len(opts)) for i in action):
                 continue
-            pairs.append((obs, action, player_idx))
+            # Outcome tag for unlikelihood training: +1 winner, -1 loser, 0 draw
+            if winner < 0:
+                outcome = 0.0
+            elif player_idx == winner:
+                outcome = 1.0
+            else:
+                outcome = -1.0
+            pairs.append((obs, action, player_idx, outcome, int(eid)))
     return pairs
 
 
 def featurize_pair(
-    obs: dict, action: List[int], deck_id: int = 0
+    obs: dict, action: List[int], deck_id: int = 0, outcome: float = 1.0,
+    episode_id: int = 0,
 ) -> Optional[Dict[str, np.ndarray]]:
     """Convert one (obs, action) pair to featurized arrays for BC training.
 
     Returns dict with keys matching BC shard format:
       board, card_ids, options, option_card, legal_mask,
-      max_count, min_count, select_type, select_ctx, deck_id, chosen
+      max_count, min_count, select_type, select_ctx, deck_id, chosen, outcome,
+      episode_id (int32) -- stable group id for episode-level train/val split
+
+    outcome: +1.0 = winner's move (BC positive), -1.0 = loser's move (unlikelihood
+    negative), 0.0 = draw (dropped, no learning signal under unlikelihood training).
     """
+    # Drops draws: they contribute zero gradient under the unlikelihood loss and
+    # only waste batch slots.
+    if outcome == 0.0:
+        return None
     feats = featurize(obs, deck_id=deck_id)
     sel = obs.get("select") or {}
     chosen = np.zeros(MAX_OPTIONS, dtype=np.float32)
@@ -136,6 +167,8 @@ def featurize_pair(
         return None
     out = dict(feats)
     out["chosen"] = chosen
+    out["outcome"] = np.float32(outcome)
+    out["episode_id"] = np.int32(episode_id)
     return out
 
 
@@ -172,13 +205,20 @@ def write_shards(
     total = 0
     t0 = time.time()
 
+    # Per-file fallback group id (only used when an episode lacks EpisodeId).
+    # Offset high so it never collides with real Kaggle EpisodeIds.
+    file_id_base = 10_000_000
+
     for i, fp in enumerate(files):
         ep = parse_episode(fp)
         if ep is None:
             continue
-        pairs = extract_pairs(ep, winner_only=winner_only, agent_names=agent_names, deck_id=deck_id)
-        for obs, action, pidx in pairs:
-            rec = featurize_pair(obs, action, deck_id=deck_id)
+        pairs = extract_pairs(
+            ep, winner_only=winner_only, agent_names=agent_names, deck_id=deck_id,
+            episode_id=file_id_base + i,
+        )
+        for obs, action, pidx, outcome, eid in pairs:
+            rec = featurize_pair(obs, action, deck_id=deck_id, outcome=outcome, episode_id=eid)
             if rec is not None:
                 shard.append(rec)
                 if len(shard) >= shard_size:
