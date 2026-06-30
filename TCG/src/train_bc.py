@@ -29,6 +29,8 @@ Training:
   - Early stopping on val BC loss plateau (patience epochs without improvement)
   - Best model (by val BC loss) saved, not just final
   - Global-norm gradient clipping (1.0) to stabilise unlikelihood training
+  - Auto-kill on bad signs: NaN/inf train loss, val BC loss above max_val_bc_loss,
+    and optional external kill_check() polled every epoch (Kaggle has no cancel)
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ import glob
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -69,6 +71,11 @@ class BCConfig:
     # Sweep {0, 0.25, 0.5, 1.0}; 0.25 is the conservative default.
     lambda_u: float = 0.25
     max_grad_norm: float = 1.0
+    # Auto-kill on bad signs: NaN/inf train loss, or val BC loss above this floor.
+    max_val_bc_loss: float = 50.0
+    # Optional callable invoked as kill_check(label) every epoch start; if it
+    # wants the run to stop it raises/exits (e.g. notebook kill_switch sys.exits).
+    kill_check: Optional[Callable[[str], None]] = None
 
 
 def load_shards(shard_glob: str) -> Dict[str, np.ndarray]:
@@ -338,13 +345,24 @@ def train_bc(cfg: BCConfig) -> Tuple[train_state.TrainState, List[dict]]:
 
     t0 = time.time()
     for epoch in range(cfg.epochs):
+        # External voluntary kill switch (Kaggle has no native cancel).
+        if cfg.kill_check is not None:
+            cfg.kill_check(f"BC epoch {epoch}")
+
         # Train one epoch
         epoch_losses = []
         for step in range(steps_per_epoch):
             idx = rng.integers(0, N_train, size=cfg.batch_size)
             batch = _to_jax_batch({k: v[idx] for k, v in train_data.items()})
             state, loss = train_step(state, batch)
-            epoch_losses.append(float(loss))
+            loss_f = float(loss)
+            if not np.isfinite(loss_f):
+                print(f"\n[auto-kill] non-finite train loss {loss_f} at epoch {epoch} step {step} \u2014 aborting")
+                history.append({"epoch": epoch, "train_loss": loss_f, "auto_kill": "non_finite"})
+                if best_state is not None:
+                    save_checkpoint(best_state, cfg.out_dir)
+                return best_state if best_state is not None else state, history
+            epoch_losses.append(loss_f)
 
         # Eval on val set
         val_metrics = eval_val(state, val_data, val_multi_mask,
@@ -352,6 +370,22 @@ def train_bc(cfg: BCConfig) -> Tuple[train_state.TrainState, List[dict]]:
                                batch_size=cfg.batch_size)
         train_loss = np.mean(epoch_losses)
         elapsed = time.time() - t0
+
+        # Auto-kill on divergent val BC loss (numbers WAY above a sane ceiling
+        # indicate the UL term has destabilised training; cut it before Kaggle
+        # billable hours pile up). Keep the best checkpoint saved so far.
+        val_bc = val_metrics["bc_loss"]
+        if not np.isfinite(val_bc) or val_bc > cfg.max_val_bc_loss:
+            print(f"\n[auto-kill] val BC loss {val_bc:.4f} exceeds ceiling "
+                  f"{cfg.max_val_bc_loss} at epoch {epoch} \u2014 aborting (best so far kept)")
+            history.append({
+                "epoch": epoch, "train_loss": round(float(train_loss), 4),
+                "val_bc_loss": round(float(val_bc), 4) if np.isfinite(val_bc) else float("inf"),
+                "auto_kill": "val_bc_floor",
+            })
+            if best_state is not None:
+                save_checkpoint(best_state, cfg.out_dir)
+            return best_state if best_state is not None else state, history
 
         # Early stopping keys on the BC term — that's the principal signal we want to minimise.
         is_best = val_metrics["bc_loss"] < best_val_bc_loss

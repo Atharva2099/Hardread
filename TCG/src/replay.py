@@ -31,7 +31,7 @@ import glob
 import json
 import os
 import time
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -181,9 +181,16 @@ def write_shards(
     agent_names: Optional[Set[str]] = None,
     deck_id: int = 0,
     verbose: bool = True,
+    kill_check: Optional[Callable[[str], None]] = None,
+    kill_every: int = 200,
 ) -> int:
     """Walk episode JSONs, extract pairs, write .npz shards.
 
+    Args:
+      kill_check: optional callable invoked as kill_check(label) every `kill_every`
+        files. If the callback wants the run to stop it should itself raise/exit
+        (e.g. the notebook's kill_switch sys.exits on STOP). Used to break long
+        Kaggle parses when an external flag is flipped.
     Returns total number of (obs, action) pairs extracted.
     """
     os.makedirs(out_dir, exist_ok=True)
@@ -229,6 +236,10 @@ def write_shards(
         if verbose and (i + 1) % 200 == 0:
             elapsed = time.time() - t0
             print(f"  {i+1}/{len(files)} files, {total + len(shard)} pairs, {elapsed:.0f}s")
+
+        # Voluntary kill switch poll — gives Kaggle an effective cancel for long parses.
+        if kill_check is not None and (i + 1) % kill_every == 0:
+            kill_check(f"replay {i+1}/{len(files)}")
 
     if shard:
         _flush_shard(shard, out_dir, shard_idx)
