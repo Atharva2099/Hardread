@@ -15,7 +15,7 @@ Layout (all fixed-size, padded):
   min_count    : int              select.minCount
   select_type  : int              select.type (SelectType)
   select_ctx   : int              select.context (SelectContext)
-  deck_id      : int              0=Lucario 1=Crustle 2=Alakazam (caller-supplied)
+  deck_id      : int              0=Lucario 1=Crustle 2=Alakazam 3=unknown (auto-detected)
 
 Card-ID space: 1..2103 (0 reserved as padding/unknown). The Flax model owns an
 nn.Embed(num_embeddings=2104, features=32); index 0 is the pad row.
@@ -34,7 +34,7 @@ NUM_CARDTYPE = 7         # CardType 0..6
 NUM_OPTION_TYPE = 17     # OptionType 0..16
 NUM_AREA = 13            # AreaType 1..12  (0 = none slot)
 NUM_SPEC_COND = 6        # SpecialConditionType 0..4  (+1 none)
-NUM_DECKS = 3
+NUM_DECKS = 4  # Lucario, Crustle, Alakazam, unknown
 CARD_ID_PAD = 0
 NUM_CARDS = 2104         # 0..2103
 
@@ -53,7 +53,7 @@ Q = 1                                      # cardId only
 # ---- board scalar width B ----
 # global: turn, turnActionCount, yourIndex(2), firstPlayer(3),
 #   supporterPlayed, stadiumPlayed, energyAttached, retreated, result(4),
-#   stadium_present, looking_present, deck_onehot(3)
+#   stadium_present, looking_present, deck_onehot(4)
 _B_GLOBAL = 2 + 2 + 3 + 4 + 4 + 1 + 1 + NUM_DECKS
 # per player: active_present, hp, maxHp, appearThisTurn,
 #   energy_counts(NUM_ENERGY), nEnergyCards, nTools, nPreEvolution,

@@ -113,6 +113,7 @@ TCG/
 * **Kaggle has no kill switch** — `kaggle kernels push` auto-runs and cannot be cancelled via CLI or UI. The only way to stop a runaway kernel is to delete it (`kaggle kernels delete`), which nukes the kernel entirely.
 * **Before pushing**, confirm with the user exactly which phase(s) should run.
 * **After a run completes**, pull outputs immediately — Kaggle may garbage-collect `/kaggle/working/` between sessions.
+* **Do NOT poll `kaggle kernels status` in loops.** Kaggle runs take minutes-to-hours. Polling wastes tokens and hurts the user. Push the kernel, report the URL, and let the user check manually or request a status check. Only pull outputs when the user asks or when enough time has clearly passed.
 
 ## Local-First Workflow
 

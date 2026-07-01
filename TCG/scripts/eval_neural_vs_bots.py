@@ -67,7 +67,8 @@ def neural_act(obs, params, deck_id=0):
     return random.sample(range(len(opts)), min(mc, len(opts)))
 
 
-def run_game(neural_params, opponent, neural_deck, opp_deck, neural_is_p0, seed=42):
+def run_game(neural_params, opponent, neural_deck, opp_deck, neural_is_p0, seed=42,
+             neural_deck_id=0):
     deck0 = neural_deck if neural_is_p0 else opp_deck
     deck1 = opp_deck if neural_is_p0 else neural_deck
 
@@ -87,9 +88,9 @@ def run_game(neural_params, opponent, neural_deck, opp_deck, neural_is_p0, seed=
             break
         yi = int(cur.get("yourIndex", 0))
         if yi == 0:
-            action = neural_act(obs, neural_params) if neural_is_p0 else opponent.act(obs)
+            action = neural_act(obs, neural_params, deck_id=neural_deck_id) if neural_is_p0 else opponent.act(obs)
         else:
-            action = opponent.act(obs) if neural_is_p0 else neural_act(obs, neural_params)
+            action = opponent.act(obs) if neural_is_p0 else neural_act(obs, neural_params, deck_id=neural_deck_id)
         if not action:
             break
         obs = battle_select(action)
@@ -107,7 +108,8 @@ def run_game(neural_params, opponent, neural_deck, opp_deck, neural_is_p0, seed=
     return (1 if neural_won else 0) if neural_won is not None else -1, steps
 
 
-def eval_matchup(neural_params, opponent_kind, neural_deck, opp_deck, opp_name, n_games, seed_base):
+def eval_matchup(neural_params, opponent_kind, neural_deck, opp_deck, opp_name, n_games, seed_base,
+                 neural_deck_id=0):
     wins = 0
     losses = 0
     draws = 0
@@ -118,7 +120,8 @@ def eval_matchup(neural_params, opponent_kind, neural_deck, opp_deck, opp_name, 
         neural_is_p0 = (i % 2 == 0)
         opp = build_opponent(opponent_kind, opp_deck, seed=seed_base + i)
         t0 = time.time()
-        result, steps = run_game(neural_params, opp, neural_deck, opp_deck, neural_is_p0, seed=seed_base + i)
+        result, steps = run_game(neural_params, opp, neural_deck, opp_deck, neural_is_p0,
+                                 seed=seed_base + i, neural_deck_id=neural_deck_id)
         elapsed = time.time() - t0
         total_steps += steps
         total_time += elapsed
@@ -155,6 +158,7 @@ def main():
     parser.add_argument("--n", type=int, default=20, help="games per matchup")
     parser.add_argument("--opponent", default="heuristic", choices=["heuristic", "bandit", "random"])
     parser.add_argument("--neural-deck", default="Lucario", choices=DECK_NAMES, help="deck the neural agent uses")
+    parser.add_argument("--matchup", nargs="*", choices=DECK_NAMES, help="specific opponent deck(s) to eval (default: all)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -163,17 +167,21 @@ def main():
         return
 
     params = load_params(args.weights)
+    opponent_decks = args.matchup if args.matchup else DECK_NAMES
     print(f"Loaded weights from {args.weights}")
     print(f"Neural deck: {args.neural_deck} | Opponent: {args.opponent} | Games/matchup: {args.n}")
+    print(f"Matchups: {opponent_decks}")
     print(f"{'='*60}")
 
     neural_deck = load_deck(args.neural_deck)
+    neural_deck_id = DECK_NAMES.index(args.neural_deck)
     all_results = []
 
-    for opp_name in DECK_NAMES:
+    for opp_name in opponent_decks:
         opp_deck = load_deck(opp_name)
         print(f"\n--- Matchup: Neural({args.neural_deck}) vs {opp_name} ({args.opponent}) ---")
-        r = eval_matchup(params, args.opponent, neural_deck, opp_deck, opp_name, args.n, args.seed)
+        r = eval_matchup(params, args.opponent, neural_deck, opp_deck, opp_name, args.n, args.seed,
+                         neural_deck_id=neural_deck_id)
         all_results.append(r)
 
     meta_wr = sum(r["win_rate"] * META_WEIGHTS[r["opponent_deck"]] for r in all_results)

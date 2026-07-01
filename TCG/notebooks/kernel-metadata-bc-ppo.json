@@ -9,9 +9,15 @@
   "enable_internet": true,
   "competition_sources": ["pokemon-tcg-ai-battle"],
   "dataset_sources": [
+    "kaggle/pokemon-tcg-ai-battle-episodes-index",
     "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-17",
     "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-18",
-    "kaggle/pokemon-tcg-ai-battle-episodes-index",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-19",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-20",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-21",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-22",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-23",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-24",
     "atharvawalawalkar/hardread-tcg-src"
   ],
   "keywords": []

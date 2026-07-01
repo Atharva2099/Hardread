@@ -28,10 +28,12 @@ class PolicyNet(nn.Module):
     trunk_hidden: int = 256
     deck_embed: int = 8
     n_cards: int = 2104
-    n_decks: int = 3
+    n_decks: int = 4
+    dropout_rate: float = 0.0
 
     @nn.compact
-    def __call__(self, feats: Dict[str, jnp.ndarray]) -> Dict[str, jnp.ndarray]:
+    def __call__(self, feats: Dict[str, jnp.ndarray],
+                 deterministic: bool = True) -> Dict[str, jnp.ndarray]:
         dims = feature_dims()
         board = feats["board"]                       # (B,) or (N, B)
         card_ids = feats["card_ids"]                 # (C,) or (N, C)
@@ -61,8 +63,10 @@ class PolicyNet(nn.Module):
         trunk_in = jnp.concatenate([board, pooled, deck_e], axis=-1)
         trunk = nn.Dense(self.trunk_hidden, name="trunk_1")(trunk_in)
         trunk = nn.relu(trunk)
+        trunk = nn.Dropout(self.dropout_rate, deterministic=deterministic)(trunk)
         trunk = nn.Dense(self.trunk_hidden, name="trunk_2")(trunk)
         trunk = nn.relu(trunk)
+        trunk = nn.Dropout(self.dropout_rate, deterministic=deterministic)(trunk)
 
         opt_card_emb = emb(option_card[:, :, 0])                          # (N, K, E)
         trunk_b = jnp.broadcast_to(trunk[:, None, :], (N, K, trunk.shape[-1]))

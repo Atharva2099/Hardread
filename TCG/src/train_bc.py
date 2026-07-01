@@ -71,6 +71,12 @@ class BCConfig:
     # Sweep {0, 0.25, 0.5, 1.0}; 0.25 is the conservative default.
     lambda_u: float = 0.25
     max_grad_norm: float = 1.0
+    # Dropout rate for trunk MLP (0.0 = no dropout). 0.1 is a conservative start.
+    dropout_rate: float = 0.1
+    # Stratified deck sampling: each deck gets at least deck_floor_frac of each
+    # batch (0.0 = uniform across all pairs). Use when deck distribution is skewed.
+    stratify_decks: bool = True
+    deck_floor_frac: float = 0.2
     # Auto-kill on bad signs: NaN/inf train loss, or val BC loss above this floor.
     max_val_bc_loss: float = 50.0
     # Optional callable invoked as kill_check(label) every epoch start; if it
@@ -134,12 +140,15 @@ def unlikelihood_loss(logits, chosen, max_count, outcome, lambda_u):
     return bc_term + lambda_u * ul_term
 
 
-def make_train_step(embed_dim: int, trunk_hidden: int, lambda_u: float):
+def make_train_step(embed_dim: int, trunk_hidden: int, lambda_u: float,
+                    dropout_rate: float = 0.0):
     """Return a JIT-compiled train_step that closes over the model config + UL weight."""
     @jax.jit
     def train_step(state, batch):
         def loss_fn(params):
-            out = PolicyNet(embed_dim=embed_dim, trunk_hidden=trunk_hidden).apply(params, batch)
+            out = PolicyNet(embed_dim=embed_dim, trunk_hidden=trunk_hidden,
+                            dropout_rate=dropout_rate).apply(
+                params, batch, deterministic=False, rngs={"dropout": jax.random.PRNGKey(0)})
             loss = unlikelihood_loss(out["logits"], batch["chosen"], batch["max_count"],
                                      batch["outcome"], lambda_u)
             return loss, out
@@ -167,7 +176,8 @@ def _top1_accuracy(logits_np: np.ndarray, chosen_np: np.ndarray,
     return correct
 
 
-def eval_val(state, val_data, val_multi_mask, embed_dim, trunk_hidden, batch_size=512):
+def eval_val(state, val_data, val_multi_mask, embed_dim, trunk_hidden,
+             batch_size=512, dropout_rate=0.0):
     """Compute val BC loss (winners), val UL loss (losers), and val top-1 accuracy.
 
     Batches val data to avoid OOM on large val sets.
@@ -194,7 +204,8 @@ def eval_val(state, val_data, val_multi_mask, embed_dim, trunk_hidden, batch_siz
         val_legal = np.asarray(val_data["legal_mask"][s:end])
         val_multi_slice = val_multi_mask[s:end]
 
-        out = PolicyNet(embed_dim=embed_dim, trunk_hidden=trunk_hidden).apply(state.params, batch)
+        out = PolicyNet(embed_dim=embed_dim, trunk_hidden=trunk_hidden,
+                        dropout_rate=dropout_rate).apply(state.params, batch, deterministic=True)
         logits = out["logits"]
 
         # Per-sample unlikelihood sub-losses (λ_u irrelevant for metric reporting)
@@ -328,10 +339,33 @@ def train_bc(cfg: BCConfig) -> Tuple[train_state.TrainState, List[dict]]:
     # Init model
     sample = {k: v[:2] for k, v in train_data.items()}
     state = init_state(cfg, sample)
-    train_step = make_train_step(cfg.embed_dim, cfg.trunk_hidden, cfg.lambda_u)
+    train_step = make_train_step(cfg.embed_dim, cfg.trunk_hidden, cfg.lambda_u,
+                                 cfg.dropout_rate)
 
     steps_per_epoch = max(1, N_train // cfg.batch_size)
     rng = np.random.default_rng(cfg.seed + 1)  # decouple batch order from split order
+
+    # Stratified deck sampling: compute per-pair weights so each deck gets
+    # at least deck_floor_frac of each batch. Caps oversampling at ~20x.
+    if cfg.stratify_decks and "deck_id" in train_data:
+        deck_ids = np.asarray(train_data["deck_id"]).ravel()
+        unique_decks, deck_counts = np.unique(deck_ids, return_counts=True)
+        total = deck_counts.sum()
+        floor_count = max(1, int(total * cfg.deck_floor_frac))
+        # Target: each deck gets at least floor_count samples per epoch
+        target = np.maximum(deck_counts.astype(float), floor_count)
+        target = target / target.sum()  # renormalize
+        sample_weights = np.zeros(N_train, dtype=np.float64)
+        print("  stratified deck sampling:")
+        for did, dc, tf in zip(unique_decks, deck_counts, target):
+            w = tf / (dc / total)  # oversampling factor
+            sample_weights[deck_ids == did] = tf / dc
+            deck_names = ["Lucario", "Crustle", "Alakazam", "unknown"]
+            name = deck_names[did] if did < len(deck_names) else f"deck{did}"
+            print(f"    {name:>10}: {dc:>6} pairs ({dc/total:.1%}) -> {tf:.1%} per batch (x{w:.1f})")
+        sample_weights /= sample_weights.sum()
+    else:
+        sample_weights = None
 
     # Early stopping state (keyed on val BC loss — the primary learning signal)
     best_val_bc_loss = float("inf")
@@ -352,7 +386,10 @@ def train_bc(cfg: BCConfig) -> Tuple[train_state.TrainState, List[dict]]:
         # Train one epoch
         epoch_losses = []
         for step in range(steps_per_epoch):
-            idx = rng.integers(0, N_train, size=cfg.batch_size)
+            if sample_weights is not None:
+                idx = rng.choice(N_train, size=cfg.batch_size, p=sample_weights)
+            else:
+                idx = rng.integers(0, N_train, size=cfg.batch_size)
             batch = _to_jax_batch({k: v[idx] for k, v in train_data.items()})
             state, loss = train_step(state, batch)
             loss_f = float(loss)
@@ -367,7 +404,7 @@ def train_bc(cfg: BCConfig) -> Tuple[train_state.TrainState, List[dict]]:
         # Eval on val set
         val_metrics = eval_val(state, val_data, val_multi_mask,
                                cfg.embed_dim, cfg.trunk_hidden,
-                               batch_size=cfg.batch_size)
+                               batch_size=cfg.batch_size, dropout_rate=cfg.dropout_rate)
         train_loss = np.mean(epoch_losses)
         elapsed = time.time() - t0
 
