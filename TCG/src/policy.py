@@ -88,22 +88,109 @@ class PolicyNet(nn.Module):
         return out
 
 
+def ordered_logp_jax(logits, legal_mask, chosen_order, action_len,
+                     temperature: float = 1.0):
+    """Correct ordered without-replacement (Plackett-Luce) log-probability.
+
+    logits       : (K,) raw masked logits (legal finite, pad -inf).
+    legal_mask   : (K,) 0/1 (or float) legality indicator (1 == legal).
+    chosen_order : (K,) int32 — the picked option indices *in sampling order*,
+                   padded with -1 after `action_len` picks.
+    action_len   : int — number of valid picks in chosen_order.
+
+    For each pick t in 1..action_len we renormalize the softmax over the
+    *remaining* legal slots (those not yet picked) and add
+    log p(chosen_order[t]) to the running log-prob. This is the exact
+    likelihood of an ordered sample without replacement; the old code summed
+    independent log-softmax terms, which double-counts renormalisation and is
+    only correct for single-select. The helper is the single source of truth
+    used by both the rollout collector and the PPO ratio, so old/new logp are
+    always consistent.
+
+    `temperature` scales logits before softmax; it must match the sampler used
+    to produce `chosen_order`. Default 1.0 (matches PPO: PPO always evaluates
+    the policy at temperature 1.0 against the logits, regardless of the
+    exploration temperature used during rollout collection).
+    """
+    K = logits.shape[0]
+    chosen_order = jnp.asarray(chosen_order, dtype=jnp.int32)
+    legal = (jnp.asarray(legal_mask) > 0).astype(jnp.float32)
+    picked = jnp.zeros(K, dtype=jnp.float32)  # 1 once a slot has been picked
+    scaled = logits / jnp.maximum(jnp.asarray(temperature, jnp.float32), 1e-6)
+
+    def step(carry, t):
+        logp_acc, picked = carry
+        avail = legal * (1.0 - picked)
+        # renormalize softmax over remaining legal slots
+        # Keep the differentiable path finite. Illegal/picked slots get
+        # effectively zero probability without introducing -inf gradients.
+        masked = jnp.where(avail > 0, scaled, jnp.asarray(-1.0e9, scaled.dtype))
+        logp_full = jax.nn.log_softmax(masked, axis=-1)
+        idx = chosen_order[t]
+        active = t < action_len
+        safe_idx = jnp.clip(idx, 0, K - 1)
+        valid_pick = (~active) | ((idx >= 0) & (idx < K) & (avail[safe_idx] > 0))
+        selected_logp = jnp.take(logp_full, safe_idx)
+        contribution = jnp.where(active, selected_logp, 0.0)
+        logp_acc = logp_acc + jnp.where(valid_pick, contribution, jnp.nan)
+        # mark this slot as picked (only when t is a real pick) so the
+        # next renormalisation excludes it
+        onehot = jnp.where(active & valid_pick, jax.nn.one_hot(safe_idx, K), 0.0)
+        picked = picked + onehot
+        return (logp_acc, picked), None
+
+    (logp_acc, _), _ = jax.lax.scan(
+        step, (jnp.asarray(0.0, jnp.float32), picked),
+        jnp.arange(K))
+    return logp_acc
+
+
 def select_action(params, feats: Dict[str, np.ndarray], rng, max_count: int,
-                  temperature: float = 0.0) -> np.ndarray:
-    """Pick top-k option indices. temperature=0 -> greedy argmax-k; >0 -> sample."""
+                  temperature: float = 0.0, embed_dim: int = 32,
+                  trunk_hidden: int = 256) -> np.ndarray:
+    """Pick up to max_count option indices *in sampling order* (NOT sorted).
+
+    temperature=0 -> greedy sequential argmax: repeatedly take the highest-logit
+    remaining legal slot. This is deterministic and order-respecting.
+    temperature>0 -> sequential without-replacement sampling: at each pick,
+    renormalize the softmax over remaining legal slots and sample one. The
+    returned array is the pick order; the caller stores it as `chosen_order`.
+
+    Returning pick order (not sorted) is required so that
+    `ordered_logp_jax(..., chosen_order, action_len, temperature=1.0)` matches
+    the sampler exactly under the standard PPO assumption that the importance
+    ratio uses the on-policy (temperature=1) policy likelihood.
+    """
     fjax = {k: jnp.asarray(v) for k, v in feats.items()}
-    out = PolicyNet().apply(params, fjax)
+    out = PolicyNet(embed_dim=embed_dim, trunk_hidden=trunk_hidden).apply(params, fjax)
     logits = np.asarray(out["logits"])
-    n_legal = int((feats["legal_mask"] > 0).sum())
+    legal = (np.asarray(feats["legal_mask"]) > 0)
+    n_legal = int(legal.sum())
     k = min(max_count, n_legal) if max_count > 0 else 0
     if k == 0:
         return np.array([], dtype=np.int32)
+    chosen = np.empty(k, dtype=np.int32)
+    remaining = legal.copy()
     if temperature <= 0:
-        order = np.argsort(-logits)
-        chosen = np.array([i for i in order if feats["legal_mask"][i] > 0][:k], dtype=np.int32)
+        for t in range(k):
+            masked = np.where(remaining, logits, -np.inf)
+            idx = int(np.argmax(masked))
+            chosen[t] = idx
+            remaining[idx] = False
         return chosen
-    probs = np.exp((logits - logits.max()) / temperature)
-    probs = probs * (feats["legal_mask"] > 0).astype(np.float32)
-    probs = probs / probs.sum()
-    chosen = np.sort(np.random.choice(len(logits), size=k, replace=False, p=probs))
-    return chosen.astype(np.int32)
+    rng_np = np.random.default_rng(int(jax.random.randint(rng, (), 0, 2**31 - 1)))
+    for t in range(k):
+        masked = np.where(remaining, logits, -np.inf)
+        scaled = masked / max(float(temperature), 1e-6)
+        scaled = scaled - np.where(np.isfinite(scaled), scaled.max(), 0.0)
+        probs = np.where(remaining, np.exp(scaled), 0.0)
+        s = probs.sum()
+        if not np.isfinite(s) or s <= 0:
+            # degenerate: fall back to uniform over remaining
+            probs = remaining.astype(np.float64)
+            s = probs.sum()
+        probs = probs / s
+        idx = int(rng_np.choice(len(logits), p=probs))
+        chosen[t] = idx
+        remaining[idx] = False
+    return chosen

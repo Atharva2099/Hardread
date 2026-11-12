@@ -1,0 +1,18 @@
+{
+  "id": "",
+  "title": "hardread-tcg-beam-bc-eval",
+  "code_file": "kaggle_beam_bc_eval.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "competition_sources": [
+    "pokemon-tcg-ai-battle"
+  ],
+  "dataset_sources": [
+    "atharvawalawalkar/hardread-tcg-search-src-v4",
+    "atharvawalawalkar/hardread-tcg-bc-v39"
+  ],
+  "keywords": []
+}

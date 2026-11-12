@@ -1,0 +1,12 @@
+{
+  "id":"",
+  "title":"hardread-tcg-ppo-head2head",
+  "code_file":"kaggle_ppo_head2head.ipynb",
+  "language":"python",
+  "kernel_type":"notebook",
+  "is_private":true,
+  "enable_gpu":false,
+  "enable_internet":true,
+  "dataset_sources":["atharvawalawalkar/hardread-tcg-src-v5","atharvawalawalkar/hardread-tcg-ppo-head2head-weights"],
+  "keywords":[]
+}

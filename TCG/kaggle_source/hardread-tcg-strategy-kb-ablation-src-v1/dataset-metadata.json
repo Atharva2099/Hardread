@@ -1,0 +1,12 @@
+{
+  "description": "Runtime source, configs, decks, and runner for the frozen v39 evaluation kernel.",
+  "id": "atharvawalawalkar/hardread-tcg-strategy-kb-ablation-src-v1",
+  "isPrivate": true,
+  "licenses": [
+    {
+      "name": "other"
+    }
+  ],
+  "subtitle": "Minimal evaluation-only source for the Lucario vs Crustle strategy KB ablation",
+  "title": "hardread-tcg-strategy-kb-ablation-src-v1"
+}

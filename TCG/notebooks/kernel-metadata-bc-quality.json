@@ -1,0 +1,37 @@
+{
+  "id": "atharvawalawalkar/hardread-tcg-bc-quality",
+  "title": "hardread-tcg-bc-quality",
+  "code_file": "kaggle_bc_quality.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "competition_sources": [
+    "pokemon-tcg-ai-battle"
+  ],
+  "dataset_sources": [
+    "kaggle/pokemon-tcg-ai-battle-episodes-index",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-16",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-17",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-18",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-19",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-20",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-21",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-22",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-23",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-24",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-25",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-06-27",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-07-03",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-07-05",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-07-06",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-07-07",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-07-08",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-07-11",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-07-12",
+    "kaggle/pokemon-tcg-ai-battle-episodes-2026-07-15",
+    "atharvawalawalkar/hardread-tcg-src"
+  ],
+  "keywords": []
+}

@@ -77,6 +77,8 @@ class BCConfig:
     # batch (0.0 = uniform across all pairs). Use when deck distribution is skewed.
     stratify_decks: bool = True
     deck_floor_frac: float = 0.2
+    # Minimum learning rate for cosine decay schedule (0 = no schedule).
+    lr_min: float = 0.0
     # Auto-kill on bad signs: NaN/inf train loss, or val BC loss above this floor.
     max_val_bc_loss: float = 50.0
     # Optional callable invoked as kill_check(label) every epoch start; if it
@@ -112,6 +114,10 @@ def load_shards(shard_glob: str) -> Dict[str, np.ndarray]:
     if not saw_episode_id:
         # No episode grouping available: unique per-row ids => row-level split.
         out["episode_id"] = np.arange(N, dtype=np.int64)
+    # Structural-clean legacy shards are treated as uniformly weighted. Quality
+    # shards provide this explicitly for outcome/agent/decision-aware BC.
+    if "sample_weight" not in out:
+        out["sample_weight"] = np.ones(N, dtype=np.float32)
     return out
 
 
@@ -119,7 +125,8 @@ def _to_jax_batch(d: Dict[str, np.ndarray]) -> Dict[str, jnp.ndarray]:
     return {k: jnp.asarray(v) for k, v in d.items()}
 
 
-def unlikelihood_loss(logits, chosen, max_count, outcome, lambda_u):
+def unlikelihood_loss(logits, chosen, max_count, outcome, lambda_u,
+                      sample_weight=None):
     """Hybrid BC + unlikelihood loss.
 
     winner pairs (outcome=+1): minimise -chosen_logp  (standard Plackett-Luce BC)
@@ -133,10 +140,15 @@ def unlikelihood_loss(logits, chosen, max_count, outcome, lambda_u):
     chosen_logp = (jnp.where(chosen > 0, logp, 0.0)).sum(axis=-1) / jnp.maximum(max_count, 1)
     is_pos = (outcome > 0).astype(jnp.float32)
     is_neg = (outcome < 0).astype(jnp.float32)
-    n_pos = jnp.maximum(is_pos.sum(), 1.0)
-    n_neg = jnp.maximum(is_neg.sum(), 1.0)
-    bc_term = -(is_pos * chosen_logp).sum() / n_pos
-    ul_term = (is_neg * chosen_logp).sum() / n_neg
+    w = jnp.ones_like(chosen_logp) if sample_weight is None else jnp.asarray(sample_weight, jnp.float32)
+    # Normalize each objective by its own effective weight so the loss scale
+    # stays stable as the winner/loser mix changes.
+    pos_w = is_pos * w
+    neg_w = is_neg * w
+    n_pos = jnp.maximum(pos_w.sum(), 1.0)
+    n_neg = jnp.maximum(neg_w.sum(), 1.0)
+    bc_term = -(pos_w * chosen_logp).sum() / n_pos
+    ul_term = (neg_w * chosen_logp).sum() / n_neg
     return bc_term + lambda_u * ul_term
 
 
@@ -150,7 +162,7 @@ def make_train_step(embed_dim: int, trunk_hidden: int, lambda_u: float,
                             dropout_rate=dropout_rate).apply(
                 params, batch, deterministic=False, rngs={"dropout": jax.random.PRNGKey(0)})
             loss = unlikelihood_loss(out["logits"], batch["chosen"], batch["max_count"],
-                                     batch["outcome"], lambda_u)
+                                     batch["outcome"], lambda_u, batch.get("sample_weight"))
             return loss, out
 
         (loss, out), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
@@ -253,13 +265,19 @@ def eval_val(state, val_data, val_multi_mask, embed_dim, trunk_hidden,
     }
 
 
-def init_state(cfg: BCConfig, sample_feats) -> train_state.TrainState:
+def init_state(cfg: BCConfig, sample_feats, total_steps: int = 0) -> train_state.TrainState:
     rng = jax.random.PRNGKey(cfg.seed)
     model = PolicyNet(embed_dim=cfg.embed_dim, trunk_hidden=cfg.trunk_hidden)
     params = model.init(rng, _to_jax_batch(sample_feats))
+    if cfg.lr_min > 0 and total_steps > 0:
+        lr_schedule = optax.cosine_decay_schedule(
+            init_value=cfg.lr, decay_steps=total_steps, alpha=cfg.lr_min / cfg.lr,
+        )
+    else:
+        lr_schedule = cfg.lr
     tx = optax.chain(
         optax.clip_by_global_norm(cfg.max_grad_norm),
-        optax.adamw(learning_rate=cfg.lr, weight_decay=cfg.weight_decay),
+        optax.adamw(learning_rate=lr_schedule, weight_decay=cfg.weight_decay),
     )
     state = train_state.TrainState.create(
         apply_fn=model.apply, params=params, tx=tx,
@@ -338,11 +356,12 @@ def train_bc(cfg: BCConfig) -> Tuple[train_state.TrainState, List[dict]]:
 
     # Init model
     sample = {k: v[:2] for k, v in train_data.items()}
-    state = init_state(cfg, sample)
-    train_step = make_train_step(cfg.embed_dim, cfg.trunk_hidden, cfg.lambda_u,
-                                 cfg.dropout_rate)
-
     steps_per_epoch = max(1, N_train // cfg.batch_size)
+    total_steps = steps_per_epoch * cfg.epochs
+    state = init_state(cfg, sample, total_steps)
+    train_step = make_train_step(cfg.embed_dim, cfg.trunk_hidden, cfg.lambda_u,
+                                  cfg.dropout_rate)
+
     rng = np.random.default_rng(cfg.seed + 1)  # decouple batch order from split order
 
     # Stratified deck sampling: compute per-pair weights so each deck gets

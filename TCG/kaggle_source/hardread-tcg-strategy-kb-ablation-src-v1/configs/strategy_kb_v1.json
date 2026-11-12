@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "name": "tcg-human-strategy-hypotheses",
+  "rules": [
+    {
+      "rule_id": "lucario_vs_crustle_wall_breaker",
+      "applicability": {
+        "deck_ids": [0],
+        "opponent_deck_ids": [1],
+        "matchup_label": "Lucario>Crustle"
+      },
+      "predicates": [
+        {"path": "current.opponent.active[0].id", "op": "in", "value": [344, 345, 1072]},
+        {"path": "current.you.active[0].id", "op": "in", "value": [673, 674, 677, 678]}
+      ],
+      "action_match": {"attackId": {"exists": true}},
+      "bonus": 0.25,
+      "confidence": 0.35,
+      "provenance": "src/search_oracle.py:_tactical_heuristic card-id matchup branch",
+      "evidence_status": "simulator_hypothesis",
+      "notes": "Prefer an available simulator-observable MAIN attack in this matchup. attackId is required and non-null; no card IDs are invented. Disabled pending controlled ablation.",
+      "enabled": false
+    },
+    {
+      "rule_id": "crustle_facing_wall_pressure_placeholder",
+      "applicability": {
+        "deck_ids": [1],
+        "opponent_deck_ids": [],
+        "matchup_label": "Crustle:any"
+      },
+      "predicates": [
+        {"path": "current.you.active[0].id", "op": "in", "value": [344, 345]}
+      ],
+      "action_match": {},
+      "bonus": 0.0,
+      "confidence": 0.2,
+      "provenance": "src/search_oracle.py:_tactical_heuristic opponent-wall branch",
+      "evidence_status": "simulator_hypothesis",
+      "notes": "The cited heuristic rewards the player facing an opponent wall; it does not establish Crustle resource conservation. Retained only for structural deck coverage.",
+      "enabled": false
+    },
+    {
+      "rule_id": "alakazam_action_rules_pending",
+      "applicability": {
+        "deck_ids": [2],
+        "opponent_deck_ids": [],
+        "matchup_label": "Alakazam:any"
+      },
+      "predicates": [],
+      "action_match": {},
+      "bonus": 0.0,
+      "confidence": 0.0,
+      "provenance": "No card-specific tactical rule asserted",
+      "evidence_status": "insufficient_evidence",
+      "notes": "Structural coverage only. This rule deliberately makes no verified or inferred Alakazam claim.",
+      "enabled": false
+    }
+  ]
+}

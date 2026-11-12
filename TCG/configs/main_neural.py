@@ -32,8 +32,18 @@ _PER_MOVE_BUDGET_S = 0.2  # 200 ms per move; 10-min match = ~3000 moves max
 
 
 def _find_file(name):
-    for d in ("", "/kaggle_simulations/agent/", os.path.dirname(os.path.abspath(__file__))):
+    for d in ("", "/kaggle_simulations/agent/", os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() and __file__ else ""):
+        if not d:
+            continue
         p = os.path.join(d, name)
+        if os.path.exists(p):
+            return p
+    # absolute fallback: try relative to cwd
+    if os.path.exists(name):
+        return name
+    # try parent of any path that contains this file
+    for base in (os.path.dirname(os.path.abspath(m.__file__)) for m in list(sys.modules.values()) if hasattr(m, '__file__') and m.__file__):
+        p = os.path.join(base, name)
         if os.path.exists(p):
             return p
     return None

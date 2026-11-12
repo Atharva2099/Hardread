@@ -208,6 +208,18 @@ def _option_vec(opt):
     return v, np.array([cid_slot], dtype=np.int32)
 
 
+def _dget(obj, key, default=None):
+    if obj is None:
+        return default
+    try:
+        return obj.get(key, default)
+    except AttributeError:
+        try:
+            return obj[key]
+        except (KeyError, TypeError):
+            return default
+
+
 def featurize(obs_dict, deck_id=0):
     """Convert a cabt obs_dict to a fixed-size structured feature dict.
 
@@ -223,8 +235,8 @@ def featurize(obs_dict, deck_id=0):
     if obs_dict is None:
         return _pack(board, card_ids, options, option_card, legal_mask, 0, 0, 0, 0, deck_id)
 
-    cur = obs_dict.get("current")
-    sel = obs_dict.get("select")
+    cur = _dget(obs_dict, "current")
+    sel = _dget(obs_dict, "select")
 
     if cur is not None:
         off = 0

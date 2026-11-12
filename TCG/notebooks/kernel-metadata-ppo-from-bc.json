@@ -1,0 +1,16 @@
+{
+  "id": "",
+  "title": "hardread-tcg-ppo-from-bc",
+  "code_file": "kaggle_ppo_from_bc.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "competition_sources": ["pokemon-tcg-ai-battle"],
+  "dataset_sources": [
+    "atharvawalawalkar/hardread-tcg-src-v5",
+    "atharvawalawalkar/hardread-tcg-bc-v39"
+  ],
+  "keywords": ["ppo", "self-play", "behavioral-cloning"]
+}

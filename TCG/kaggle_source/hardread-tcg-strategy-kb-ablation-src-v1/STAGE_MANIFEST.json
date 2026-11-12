@@ -1,0 +1,17 @@
+{
+  "dataset_slug": "atharvawalawalkar/hardread-tcg-strategy-kb-ablation-src-v1",
+  "files": [
+    "src/__init__.py",
+    "src/featurizer.py",
+    "src/policy_numpy.py",
+    "src/rewards.py",
+    "src/search_oracle.py",
+    "src/strategy_kb.py",
+    "src/rollout_worker.py",
+    "scripts/eval_strategy_kb_ablation.py",
+    "configs/strategy_kb_v1.json",
+    "configs/deck_lucario.csv",
+    "configs/deck_crustle.csv"
+  ],
+  "source_root": "hardread-tcg-strategy-kb-ablation-src-v1"
+}

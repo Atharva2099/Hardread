@@ -228,7 +228,17 @@ def extract_pairs(
             if not isinstance(action, list) or len(action) == 0:
                 continue
             opts = sel.get("option") or []
-            if any(not (0 <= i < len(opts)) for i in action):
+            # Deck-selection is represented by the 60 card IDs selected by the
+            # agent, not option indices. It can appear as the first actionable
+            # step and must never become a normal BC example.
+            if int(sel.get("type", -1)) == 9 or len(action) >= 30:
+                continue
+            if any(not isinstance(i, (int, np.integer)) or not (0 <= i < len(opts)) for i in action):
+                continue
+            # cabt's maxCount is the maximum number of option indices. Reject
+            # malformed/replay-schema-incompatible records rather than training
+            # on labels that cannot be reproduced by the submission policy.
+            if len(set(int(i) for i in action)) > int(sel.get("maxCount", len(action))):
                 continue
             if winner < 0:
                 outcome = 0.0

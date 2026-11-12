@@ -1,13 +1,4 @@
-"""Per-matchup eval of the neural (BC) agent vs rule-based bots.
-
-Runs inside Docker (cg engine requires Linux). For each opponent deck
-(Lucario, Crustle, Alakazam), plays N games with alternating seats.
-Reports per-matchup win rates + meta-weighted average.
-
-Usage:
-    python scripts/eval_neural_vs_bots.py --weights outputs/logs/bcppo/weights/bc.npz --n 20
-    python scripts/eval_neural_vs_bots.py --weights weights.npz --n 50 --opponent heuristic --neural-deck Lucario
-"""
+"""Per-matchup eval of the neural (BC) agent vs rule-based bots."""
 
 import argparse
 import json
@@ -20,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
-from cg.game import battle_finish, battle_select, battle_start
+from kaggle_environments import make
 
 from src.agent import BanditAgent, HeuristicAgent, RandomAgent
 from src.featurizer import featurize
@@ -31,9 +22,21 @@ META_WEIGHTS = {"Lucario": 0.6, "Crustle": 0.2, "Alakazam": 0.2}
 
 
 def load_deck(name):
-    p = f"configs/deck_{name.lower()}.csv"
-    if not os.path.exists(p):
-        raise FileNotFoundError(f"deck not found: {p}")
+    filename = f"deck_{name.lower()}.csv"
+    here = Path(__file__).resolve().parent
+    candidates = [
+        Path("configs") / filename,
+        here.parent / "configs" / filename,
+        Path("/kaggle/working/configs") / filename,
+        Path("/kaggle/input/hardread-tcg-src/configs") / filename,
+    ]
+    for root in (Path("/kaggle/input"),):
+        if root.exists():
+            candidates.extend(root.glob(f"**/{filename}"))
+    p = next((c for c in candidates if c.exists()), None)
+    if p is None:
+        searched = ", ".join(str(c) for c in candidates[:8])
+        raise FileNotFoundError(f"deck not found: {filename}; searched {searched}")
     with open(p) as f:
         return [int(line.strip()) for line in f if line.strip()][:60]
 
@@ -42,18 +45,30 @@ def build_opponent(kind, deck, seed):
     if kind == "heuristic":
         return HeuristicAgent(deck=deck)
     elif kind == "bandit":
-        return BanditAgent(deck, seed=seed)
+        return BanditAgent(deck=deck, seed=seed)
     elif kind == "random":
         return RandomAgent(deck=deck)
     raise ValueError(f"unknown opponent: {kind}")
 
 
+def _obj_get(obj, key, default=None):
+    if obj is None:
+        return default
+    try:
+        return obj.get(key, default)
+    except AttributeError:
+        try:
+            return obj[key]
+        except (KeyError, TypeError):
+            return default
+
+
 def neural_act(obs, params, deck_id=0):
-    sel = obs.get("select") if obs else None
+    sel = _obj_get(obs, "select")
     if sel is None:
         return []
-    opts = sel.get("option") or []
-    mc = int(sel.get("maxCount", 1))
+    opts = _obj_get(sel, "option") or []
+    mc = int(_obj_get(sel, "maxCount", 1))
     if not opts or mc <= 0:
         return []
     try:
@@ -62,9 +77,26 @@ def neural_act(obs, params, deck_id=0):
         chosen = numpy_select(logits, max_count=mc, temperature=0.0)
         if len(chosen) > 0:
             return [int(i) for i in chosen]
-    except Exception:
-        pass
+    except Exception as e:
+        import traceback
+        print(f"[neural_act] inference fallback: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
     return random.sample(range(len(opts)), min(mc, len(opts)))
+
+
+def _extract_winner(trajectory):
+    if not trajectory:
+        return -1
+    last = trajectory[-1]
+    if isinstance(last, (list, tuple)) and len(last) >= 2:
+        r0 = _obj_get(last[0], "reward")
+        r1 = _obj_get(last[1], "reward")
+        if r0 is not None and r1 is not None:
+            if r0 > r1:
+                return 0
+            if r1 > r0:
+                return 1
+    return -1
 
 
 def run_game(neural_params, opponent, neural_deck, opp_deck, neural_is_p0, seed=42,
@@ -72,31 +104,21 @@ def run_game(neural_params, opponent, neural_deck, opp_deck, neural_is_p0, seed=
     deck0 = neural_deck if neural_is_p0 else opp_deck
     deck1 = opp_deck if neural_is_p0 else neural_deck
 
-    obs, _ = battle_start(deck0, deck1)
-    if obs is None:
-        return -1, 0
+    def is_initial_sel(obs):
+        return obs is None or isinstance(obs, list) or _obj_get(obs, "select") is None
 
-    steps = 0
-    winner = -1
-    while True:
-        cur = obs.get("current")
-        if cur is None or cur.get("result", -1) >= 0:
-            winner = cur.get("result", -1) if cur else -1
-            break
-        sel = obs.get("select")
-        if sel is None:
-            break
-        yi = int(cur.get("yourIndex", 0))
-        if yi == 0:
-            action = neural_act(obs, neural_params, deck_id=neural_deck_id) if neural_is_p0 else opponent.act(obs)
-        else:
-            action = opponent.act(obs) if neural_is_p0 else neural_act(obs, neural_params, deck_id=neural_deck_id)
-        if not action:
-            break
-        obs = battle_select(action)
-        steps += 1
+    def neural_fn(obs):
+        if is_initial_sel(obs):
+            return neural_deck
+        return neural_act(obs, neural_params, deck_id=neural_deck_id)
 
-    battle_finish()
+    env = make("cabt", configuration={"decks": [deck0, deck1]}, debug=False)
+    if neural_is_p0:
+        trajectory = env.run([neural_fn, opponent.act])
+    else:
+        trajectory = env.run([opponent.act, neural_fn])
+    winner = _extract_winner(trajectory)
+    steps = len(trajectory)
 
     if winner == 0:
         neural_won = neural_is_p0

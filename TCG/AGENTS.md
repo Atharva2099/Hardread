@@ -20,6 +20,18 @@ Build a local-first Pokémon TCG AI Battle agent workflow that can:
 4. Produce valid competition submissions.
 5. Keep all reusable orchestration compatible with the shared `docs/` agent system.
 
+## North Star
+
+The broader purpose is to use this work to become a stronger AI/RL engineer and
+to document that growth clearly. Competition performance matters, but the deeper
+goal is to build practical intuition for agents, simulation, offline data,
+evaluation, and reinforcement learning in a real strategic domain.
+
+Prefer work that leaves behind understandable code, reproducible experiments,
+and honest notes about what was learned. The project should be useful both as a
+competition entry and as evidence of research taste, engineering maturity, and
+long-term interest in AI for games.
+
 ## Human-in-the-Loop Rule
 
 * Stop after each meaningful change or experiment iteration.

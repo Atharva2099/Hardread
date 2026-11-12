@@ -1,0 +1,16 @@
+{
+  "id": "atharvawalawalkar/hardread-tcg-strategy-kb-ablation-eval",
+  "title": "hardread-tcg-strategy-kb-ablation-eval",
+  "code_file": "kaggle_strategy_kb_ablation.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": false,
+  "competition_sources": ["pokemon-tcg-ai-battle"],
+  "dataset_sources": [
+    "atharvawalawalkar/hardread-tcg-strategy-kb-ablation-src-v1",
+    "atharvawalawalkar/hardread-tcg-bc-v39"
+  ],
+  "keywords": []
+}
