@@ -28,3 +28,8 @@ TCG/Data/*.pdf
 
 # Generated outputs
 TCG/outputs/
+
+# smogon-bench
+VGC/benchmarks/smogon_bench/.showdown/
+VGC/outputs/smogon_bench/
+outputs/smogon_bench/

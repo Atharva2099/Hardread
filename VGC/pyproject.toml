@@ -18,6 +18,7 @@ dependencies = [
 server = "env.server.app:main"
 
 [project.optional-dependencies]
+bench = ["pyyaml>=6", "matplotlib>=3.7", "scipy>=1.10"]
 dev = [
   "pytest>=7.0.0",
   "ruff>=0.5.0",

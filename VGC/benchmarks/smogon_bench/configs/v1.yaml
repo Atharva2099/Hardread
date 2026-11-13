@@ -1,0 +1,70 @@
+# smogon-bench-v1 frozen config. Changing anything under the "identity" keys means a new
+# benchmark version. The `labeller` block is versioned separately (relabelling never
+# changes bench_id).
+bench_id: smogon-bench-v1
+
+game:
+  format: gen4randombattlefixedteams      # custom server format (see showdown/custom-formats.ts)
+  plain_format: gen4randombattle          # only for the turn-length sanity check
+  team_generator_format: gen4randombattle
+  turn_cap: 300                           # reaching it counts as a loss for "ours"
+
+showdown:
+  commit: 5c28e341ef9f9730a35874390cc3bc2aead7a16e
+  custom_formats_template: showdown/custom-formats.ts
+poke_env_version: "0.8.4"
+
+teams:
+  seed_base: 20261113                     # reduced mod 65536; pair i uses [base, i, side, 0]
+  manifest: outputs/smogon_bench/teams/manifest.json   # relative to VGC/
+
+# Phase 2 fills these in for LLM policies; bots ignore them.
+prompt: {system_prompt_sha256: null, state_formatter_version: null}
+decoding: {temperature: null, top_p: null, max_new_tokens: null, seed_policy: null}
+
+opponents:
+  - RandomPlayer
+  - MaxBasePowerPlayer
+  - SimpleHeuristicsPlayer
+
+runner:
+  concurrency: 12
+  start_timeout_s: 30        # battle must exist within this long
+  stall_timeout_s: 60        # no protocol message for this long => stalled
+  game_timeout_s: 300        # hard wall-clock cap per game
+  max_retries: 3             # replays per game slot after errors
+
+stats:
+  bootstrap_resamples: 300
+  bootstrap_seed: 12345
+  bt_anchor: {player: RandomPlayer, elo: 1000}
+  bt_prior_games: 1.0        # virtual drawn games added per connected pair (keeps the MLE finite)
+  alpha: 0.05
+  power: 0.80
+
+labeller:
+  version: v1
+  # Switch quality
+  switch_weak_mult: 2.0          # worst multiplier >= this => "weak"
+  # Non-attacking moves
+  heal_wasted_hp_pct: 75         # heal above this HP% (or failed) is wasted
+  heal_good_hp_pct: 50           # heal below this HP% is good
+  setup_early_max_turn: 5
+  setup_risky_hp_pct: 50
+  turn_buckets: [[1, 5], [6, 15], [16, 9999]]
+  hazard_max_layers: {stealthrock: 1, spikes: 3, toxicspikes: 2}
+  # Move category id lists
+  moves:
+    heal: [recover, roost, softboiled, slackoff, milkdrink, moonlight, morningsun, synthesis, rest, wish, healorder, healbell, aromatherapy, swallow]
+    setup: [swordsdance, nastyplot, calmmind, dragondance, bulkup, agility, rockpolish, curse, growth, howl, meditate, sharpen, harden, irondefense, acidarmor, amnesia, barrier, cosmicpower, defendorder, doubleteam, minimize, tailglow, workup, coil, shellsmash, quiverdance, autotomize, bellydrum, charge, stockpile, withdraw, defensecurl, flamecharge]
+    hazards: [stealthrock, spikes, toxicspikes]
+    hazard_removal: [rapidspin, defog]
+    status: [toxic, thunderwave, willowisp, spore, sleeppowder, hypnosis, sing, lovelykiss, glare, stunspore, poisonpowder, grasswhistle, darkvoid, confuseray, supersonic, swagger, sweetkiss, teeterdance, flatter, yawn, poisongas]
+    protect: [protect, detect, substitute, endure]
+  # Type immunities for wasted-status checks (Gen 4 mechanics: powder moves hit Grass)
+  status_immune_types:
+    thunderwave: [GROUND]
+    toxic: [STEEL, POISON]
+    poisonpowder: [STEEL, POISON]
+    poisongas: [STEEL, POISON]
+    willowisp: [FIRE]
