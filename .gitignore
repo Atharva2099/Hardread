@@ -33,3 +33,7 @@ TCG/outputs/
 VGC/benchmarks/smogon_bench/.showdown/
 VGC/outputs/smogon_bench/
 outputs/smogon_bench/
+
+# RL runs (checkpoints, metrics)
+VGC/outputs/rl/
+outputs/rl/

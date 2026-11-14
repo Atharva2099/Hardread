@@ -63,6 +63,12 @@ from rl.obs import OBS_DIM, encode
 TURN_CAP = 300  # safety net only; real games end long before this
 
 
+class StallError(RuntimeError):
+    """The server sent no decision in time (stuck game), or the env was already broken by one.
+    A RuntimeError subclass so old `except RuntimeError` code keeps working; vec_env's worker
+    catches exactly this to abandon the game and rebuild the env instead of dying."""
+
+
 class AgentPlayer(RejectionMixin, Player):
     """The player our policy controls.  It never decides anything itself: when poke-env
     asks `choose_move`, it passes the battle to the main thread and waits for an order.
@@ -158,7 +164,7 @@ class PokemonEnv(gym.Env):
             return self.agent.battle_q.get(timeout=self.timeout_s)
         except queue.Empty:
             self._broken = True  # the game's state is unknown now: refuse further use
-            raise RuntimeError(f"no decision from the server for {self.timeout_s}s (stuck game?)")
+            raise StallError(f"no decision from the server for {self.timeout_s}s (stuck game?)")
 
     def _send_order(self, order: BattleOrder) -> None:
         self.agent.awaiting = False
@@ -179,9 +185,19 @@ class PokemonEnv(gym.Env):
             self._battle = self._wait_for_battle()
         self._drain_orders()
 
+    def forfeit_nowait(self) -> None:
+        """Best effort, never blocks and never raises: if a decision is pending, answer it with a
+        forfeit.  Used when abandoning a stuck game (the env is then closed and rebuilt, which also
+        drops the connection, so the server ends the game either way)."""
+        try:
+            if self.agent.awaiting:
+                self._send_order(ForfeitBattleOrder())
+        except Exception:
+            pass
+
     def _check_usable(self) -> None:
         if self._broken:
-            raise RuntimeError("PokemonEnv is broken after a timeout; create a new one")
+            raise StallError("PokemonEnv is broken after a timeout; create a new one")
 
     def _observe(self, battle) -> Tuple[np.ndarray, np.ndarray]:
         mask = action_mask(battle)
@@ -232,10 +248,13 @@ class PokemonEnv(gym.Env):
         # choose_move) already banned the refused action: a hidden trap (Shadow Tag, Arena
         # Trap, Magnet Pull) is the only legitimate cause, since the request only said
         # `maybeTrapped`.  This re-ask is a step too: reward 0, same state, smaller mask.
-        if self.agent.tracker.rejected:
+        rejected = self.agent.tracker.rejected
+        if rejected:
             self._rejections["maybe_trapped" if maybe_trapped else "other"] += 1
         obs, mask = self._observe(battle)
-        return obs, 0.0, False, False, {"action_mask": mask, "turn": battle.turn}
+        # info["rejected"] = True means the action we just sent was NOT played: learners should
+        # drop that step instead of giving it credit for the game's outcome.
+        return obs, 0.0, False, False, {"action_mask": mask, "turn": battle.turn, "rejected": rejected}
 
     def _finish(self, battle):
         capped = self.ctx.cap_hit

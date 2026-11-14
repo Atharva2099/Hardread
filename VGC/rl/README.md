@@ -12,6 +12,8 @@ the local Showdown server from `benchmarks/smogon_bench/` and shares its evaluat
 | `vec_env.py` | `make_vec_env(n, opponent=...)`: N envs in N processes, auto-reset |
 | `policy_player.py` | `PolicyPlayer` + `uniform_masked_policy`: a policy as a poke-env Player |
 | `benchmark.py` | the benchmark runner CLI, with our policy names registered |
+| `algos/ppo.py`, `algos/PPO.md` | masked vectorised PPO + opponent curriculum (CleanRL style), with a teaching doc |
+| `run_forever.sh` | supervisor: restarts a crashed PPO run from its `latest.pt` (`--resume`); see `algos/PPO.md` |
 | `throughput.py`, `play_episodes.py` | speed measurement and an env smoke test |
 
 ## The environment in one screen
