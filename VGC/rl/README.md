@@ -9,11 +9,11 @@ the local Showdown server from `benchmarks/smogon_bench/` and shares its evaluat
 | `obs.py` | `encode(battle) -> float32[255]`. Full index table in the docstring. `OBS_VERSION = "v1"` |
 | `actions.py` | 9 actions, `action_mask(battle)`, `to_order(battle, action)` |
 | `env.py` | `PokemonEnv`: single-agent gym env (our policy vs one poke-env bot) |
-| `vec_env.py` | `make_vec_env(n, opponent=...)`: N envs in N processes, auto-reset |
+| `vec_env.py` | `make_vec_env(n, opponent=...)`: N envs in N processes, auto-reset; owned Showdown servers can be recycled (`recycle_servers`) |
 | `policy_player.py` | `PolicyPlayer` + `uniform_masked_policy`: a policy as a poke-env Player |
 | `benchmark.py` | the benchmark runner CLI, with our policy names registered |
 | `algos/ppo.py`, `algos/PPO.md` | masked vectorised PPO + opponent curriculum (CleanRL style), with a teaching doc |
-| `run_forever.sh` | supervisor: restarts a crashed PPO run from its `latest.pt` (`--resume`); see `algos/PPO.md` |
+| `run_forever.sh` | supervisor: restarts a crashed PPO run from its `latest.pt` (`--resume`); the server memory leak is handled inside PPO (`--server-recycle-minutes`, default 30); see `algos/PPO.md` |
 | `throughput.py`, `play_episodes.py` | speed measurement and an env smoke test |
 
 ## The environment in one screen

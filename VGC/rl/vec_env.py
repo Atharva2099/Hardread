@@ -23,11 +23,21 @@ Stalls (see _Slot): one stuck or slow game never kills the run.  The worker aban
 env and reports `truncated=True, reward=0, info["episode"]["aborted"]=True` for the lost game.  If the
 Showdown server itself died (_OwnedServers), the parent restarts it (3 times max), respawns all workers
 and reports an aborted step (reason "server_restart") for every env.
+
+Planned recycling (`recycle_servers`, _OwnedServers only): the Showdown server leaks memory (its
+per-battle simulator processes grow ~1.9 GB/hour) and slows down.  Between two rollouts the trainer can
+call `recycle_servers()`: workers are closed cleanly, every server is stopped and started again (new
+ports), and the workers are respawned on them with their current opponents.  Games in flight are lost
+(the trainer drops them without an outcome).  This is not a crash: it does not count toward the restart
+limit.  `server_rss_mb()` reports the servers' memory (process trees, via `ps`) so the trainer can
+recycle on a memory threshold.
 """
 
 from __future__ import annotations
 
 import multiprocessing as mp
+import subprocess
+import time
 import traceback
 from typing import Any, Dict, List, Optional, Type
 
@@ -220,8 +230,8 @@ class VecEnv:
         Overridden by _OwnedServers (restart a dead Showdown server)."""
         return False
 
-    def _respawn_all(self, ports: Optional[List[int]] = None) -> None:
-        """Kill every worker and start new ones (new ports if given, current opponents)."""
+    def _close_workers(self) -> None:
+        """Ask every worker to close (their envs disconnect from the server), wait, and reap them."""
         for c in self._conns:
             try:
                 c.send(("close", None))
@@ -237,10 +247,23 @@ class VecEnv:
                 c.close()
             except Exception:
                 pass
+
+    def _respawn_all(self, ports: Optional[List[int]] = None) -> None:
+        """Kill every worker and start new ones (new ports if given, current opponents)."""
+        self._close_workers()
         for i in range(self.n_envs):
             if ports is not None:
                 self._kw[i] = dict(self._kw[i], port=ports[i % len(ports)])
             self._spawn(i)
+
+    def recycle_servers(self) -> bool:
+        """Restart the Showdown servers between rollouts.  Attached-port mode does not own the
+        servers: nothing to do (False).  Overridden by _OwnedServers."""
+        return False
+
+    def server_rss_mb(self) -> Optional[float]:
+        """Total memory (MB) of the owned Showdown servers; None when we do not own any."""
+        return None
 
     def _gather(self):
         # Read EVERY worker's answer first (so no pipe is left unread), and only then
@@ -316,6 +339,29 @@ class VecEnv:
                 p.terminate()
 
 
+def tree_rss_mb(ps_output: str, root_pids: List[int]) -> float:
+    """Sum RSS (MB) of the given pids and all their descendants, from `ps -A -o pid=,ppid=,rss=` output
+    (rss in KB; same format on macOS and Linux)."""
+    rss, children = {}, {}
+    for line in ps_output.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            pid, ppid, kb = map(int, parts)
+        except ValueError:
+            continue
+        rss[pid] = kb
+        children.setdefault(ppid, []).append(pid)
+    seen, stack = set(), list(root_pids)
+    while stack:
+        pid = stack.pop()
+        if pid not in seen:
+            seen.add(pid)
+            stack.extend(children.get(pid, []))
+    return sum(rss.get(p, 0) for p in seen) / 1024.0
+
+
 class _OwnedServers(VecEnv):
     """VecEnv that also owns (and stops) the Showdown servers it started."""
 
@@ -324,6 +370,7 @@ class _OwnedServers(VecEnv):
         super().__init__(n_envs, env_kwargs, [s.port for s in servers], worker, opponents)
 
     max_server_restarts = MAX_SERVER_RESTARTS
+    recycles = 0  # planned restarts so far (separate from the crash counter _restarts)
 
     @staticmethod
     def _dead(server) -> bool:
@@ -347,6 +394,41 @@ class _OwnedServers(VecEnv):
             s.start()
         self._respawn_all([s.port for s in self._servers])
         return True
+
+    def recycle_servers(self) -> bool:
+        """Planned restart of every server (the leak fix).  Call it between steps (workers idle).
+        Workers are closed FIRST so none errors on a dead server; then each server is stopped and
+        started (fresh port) and all workers are respawned there with their current opponents (`_kw`).
+        Does not touch the crash counter `_restarts`."""
+        self._close_workers()
+        for s in self._servers:
+            self._restart_server(s)
+        self._respawn_all([s.port for s in self._servers])
+        self.recycles += 1
+        return True
+
+    @staticmethod
+    def _restart_server(server, attempts: int = 3, wait_s: float = 1.0) -> None:
+        """stop() + start() with up to `attempts` tries (stop() between them, a short sleep); the last
+        error is re-raised."""
+        for k in range(attempts):
+            server.stop()
+            try:
+                server.start()
+                return
+            except Exception:
+                if k == attempts - 1:
+                    raise
+                time.sleep(wait_s)
+
+    def server_rss_mb(self) -> Optional[float]:
+        pids = [s.proc.pid for s in self._servers if getattr(s, "proc", None) is not None]
+        try:
+            out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,rss="], capture_output=True, text=True,
+                                 timeout=10).stdout
+        except Exception:
+            return None
+        return tree_rss_mb(out, pids)
 
     def close(self) -> None:
         super().close()

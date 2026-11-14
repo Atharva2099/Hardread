@@ -83,6 +83,20 @@ One slow game must never kill a run, so:
   relative to the ORIGINAL `--total-steps`), appends to `metrics.jsonl`/`episodes.jsonl` (rows written
   after the checkpoint are dropped first, so there are no duplicates) and writes a `resumed` line to
   `events.jsonl`.  Refuses a different `OBS_VERSION`.  Games in flight at the crash are lost.  Only
-  `--stall-timeout/--max-aborts/--save-every/--ckpt-every` can be changed on resume.
-* **Supervisor.** `rl/run_forever.sh <run_id> [ppo args]` restarts a crashed run from `latest.pt`
+  `--stall-timeout/--max-aborts/--save-every/--ckpt-every` (and the machine knobs `--n-servers`, `--torch-threads`, `--server-recycle-*`) can be changed on resume.
+* **Server recycling.** The Showdown server leaks memory (battle simulator processes grow ~150 MB to
+  ~1.9 GB per hour) and gets slower (about 1300 to 850 steps/s).  When PPO owns its servers
+  (no attached port), it restarts them between two updates: `--server-recycle-minutes` (default 30,
+  0 = off) and `--server-recycle-rss-mb` (default 0 = off; recycle when the servers' total RSS exceeds
+  it).  Workers are closed, every server is stopped and started on a fresh port, workers respawn there
+  with their current opponents and the collector state is reset.  Games in flight are dropped without
+  an outcome (their rollout was already bootstrapped like a time-limit cut), so they are neither
+  episodes nor aborts.  It is a planned restart, not a crash: it does not count toward the 3 server
+  restarts.  Each recycle writes a `server_recycle` line to `events.jsonl`; `metrics.jsonl` rows carry
+  `server_recycles`.  The old external "SIGTERM the trainer every 40 minutes" workaround is no longer
+  needed; the flags may be changed on `--resume`.  `server_recycles` in a metrics row is the cumulative
+  count before that update's own recycle (it is checkpointed and restored on resume).  The RSS sum counts
+  pages shared between forked simulator processes more than once, so the RSS threshold is a relative
+  one, not true memory use.  A server that fails to start is retried 3 times before the run raises.
+* **Supervisor.** `rl/run_forever.sh <run_id> [ppo args]` restarts a crashed run from `latest.pt` (still useful for crashes; not needed for the server memory leak)
   (`MAX_RESTARTS`, default 5; 30 s wait; log in `<run_dir>/supervisor.log`).

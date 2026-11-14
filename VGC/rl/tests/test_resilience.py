@@ -139,16 +139,23 @@ class FakeServer:
     """`proc.poll()` is None while 'alive'.  start() gives a new port (like ShowdownServer), or the
     dead port 1 again if `always_dies`."""
 
-    def __init__(self, always_dies=False):
+    _next_port = 1000  # distinct port per start, across all servers
+
+    def __init__(self, always_dies=False, fail_starts=0):
         self.port, self.starts, self.always_dies = 1, 0, always_dies
+        self.fail_starts, self.start_calls = fail_starts, 0
         self.proc = types.SimpleNamespace(poll=lambda: 1)  # dead from the start
 
     def start(self):
+        self.start_calls += 1
+        if self.start_calls <= self.fail_starts:
+            raise RuntimeError("cannot start")
         self.starts += 1
         if self.always_dies:
             self.port, self.proc = 1, types.SimpleNamespace(poll=lambda: 1)
         else:
-            self.port, self.proc = 100 + self.starts, types.SimpleNamespace(poll=lambda: None)
+            FakeServer._next_port += 1
+            self.port, self.proc = FakeServer._next_port, types.SimpleNamespace(poll=lambda: None)
         return self
 
     def stop(self):
@@ -161,7 +168,7 @@ def test_dead_server_is_restarted_and_workers_respawned():
     try:
         vec.reset()
         obs, rew, term, trunc, infos = vec.step([0, 0])      # workers fail: the server is dead
-        assert srv.starts == 1 and srv.port == 101
+        assert srv.starts == 1 and srv.port > 1
         assert trunc.all() and not term.any() and (rew == 0).all()
         assert all(i["episode"]["aborted"] and i["episode"]["reason"] == "server_restart" for i in infos)
         assert all(i["action_mask"].any() for i in infos)
@@ -411,3 +418,166 @@ def test_failed_save_leaves_previous_latest_intact(tmp_path, monkeypatch):
     assert path.read_bytes() == before
     assert not list(tmp_path.glob("*.tmp"))
     assert torch.load(path, weights_only=False)["update"] == 1
+
+
+# =============================================================== 5. planned server recycling
+def _live(srv):
+    srv.proc = types.SimpleNamespace(poll=lambda: None)
+    return srv
+
+
+def test_recycle_servers_restarts_all_and_respawns_workers_with_opponents():
+    from rl.vec_env import VecEnv
+    s1, s2 = _live(FakeServer()), _live(FakeServer())
+    s2.port = 2
+    vec = _OwnedServers(3, {"opponent": OppA}, [s1, s2], worker=server_worker)
+    try:
+        vec.reset()
+        vec.set_opponent(1, OppB)
+        old_procs = list(vec._procs)
+        assert vec.recycle_servers() is True
+        assert s1.starts == 1 and s2.starts == 1 and s1.port != s2.port and s1.port > 1000
+        ports = [s1.port, s2.port]
+        assert [kw["port"] for kw in vec._kw] == [ports[i % 2] for i in range(3)]
+        assert [kw["opponent"] for kw in vec._kw] == [OppA, OppB, OppA]
+        assert all(not p.is_alive() for p in old_procs)
+        assert vec.recycles == 1 and getattr(vec, "_restarts", 0) == 0   # planned, not a crash
+        obs, rew, term, trunc, infos = vec.step([0, 0, 0])              # new workers work
+        assert not trunc.any()
+        for _ in range(5):                                              # never exhausts the crash budget
+            vec.recycle_servers()
+        assert vec.recycles == 6 and getattr(vec, "_restarts", 0) == 0
+    finally:
+        vec.close()
+    assert VecEnv.recycle_servers(vec) is False and VecEnv.server_rss_mb(vec) is None
+
+
+def test_base_vecenv_recycle_is_a_noop():
+    from rl.vec_env import VecEnv
+    vec = VecEnv(1, {"opponent": OppA}, [5], worker=server_worker)
+    try:
+        assert vec.recycle_servers() is False and vec.server_rss_mb() is None
+    finally:
+        vec.close()
+
+
+def test_tree_rss_mb_parses_ps_output():
+    from rl.vec_env import tree_rss_mb
+    out = """
+      10     1   1024
+      11    10   2048
+      12    11   1024
+      20     1   9999
+      30    10   notanumber
+    """
+    assert tree_rss_mb(out, [10]) == (1024 + 2048 + 1024) / 1024.0
+    assert tree_rss_mb(out, [10, 20]) == (1024 + 2048 + 1024 + 9999) / 1024.0
+    assert tree_rss_mb(out, [999]) == 0.0
+
+
+class RecyclingFake(DetFake):
+    def __init__(self, rss=None, **kw):
+        super().__init__(**kw)
+        self.calls, self.resets, self.rss = [], 0, rss
+
+    def reset(self):
+        self.resets += 1
+        self.calls.append("reset")
+        return super().reset()
+
+    def recycle_servers(self):
+        self.calls.append("recycle")
+        return True
+
+    def server_rss_mb(self):
+        return self.rss
+
+
+def test_train_recycles_between_updates_and_logs_event(tmp_path):
+    import json
+    env = RecyclingFake()
+    run = tmp_path / "run"
+    run.mkdir()
+    logs = []
+    out = P.train(_args(["--total-steps", str(64 * 3), "--server-recycle-minutes", "1e-9"]), env, DetFake.OBS,
+                  run, log=logs.append, opponent_classes={n: n for n in P.PHASE_NAMES})
+    # recycled after updates 1 and 2, not after the final one 3; each recycle is followed by a reset
+    assert env.calls == ["reset", "recycle", "reset", "recycle", "reset"]
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    assert [r["server_recycles"] for r in rows] == [0, 1, 2]
+    evs = [json.loads(l) for l in (run / "events.jsonl").read_text().splitlines()]
+    assert [(e["event"], e["update"], e["reason"]) for e in evs] == [("server_recycle", 1, "time"),
+                                                                     ("server_recycle", 2, "time")]
+    assert {"total_steps", "rss_mb", "seconds", "time"} <= set(evs[0])
+    assert not any(e.get("event") for e in out["events"])        # curriculum events stay separate
+    assert any("recycled" in m for m in logs)
+
+
+def test_train_recycles_on_rss_threshold():
+    import json
+    env = RecyclingFake(rss=5000.0)
+    P.train(_args(["--total-steps", str(64 * 2), "--server-recycle-minutes", "0", "--server-recycle-rss-mb", "4000"]),
+            env, DetFake.OBS, None, log=lambda *_: None)
+    assert env.calls == ["reset", "recycle", "reset"]
+    env = RecyclingFake(rss=100.0)
+    P.train(_args(["--total-steps", str(64 * 2), "--server-recycle-minutes", "0", "--server-recycle-rss-mb", "4000"]),
+            env, DetFake.OBS, None, log=lambda *_: None)
+    assert env.calls == ["reset"]
+
+
+def test_train_never_recycles_when_off_or_without_the_method():
+    env = RecyclingFake()
+    P.train(_args(["--total-steps", str(64 * 3), "--server-recycle-minutes", "0"]), env, DetFake.OBS, None,
+            log=lambda *_: None)
+    assert env.calls == ["reset"]
+    P.train(_args(["--total-steps", str(64 * 2), "--server-recycle-minutes", "1e-9"]), DetFake(), DetFake.OBS,
+            None, log=lambda *_: None)                           # no recycle_servers attribute: fine
+    env = RecyclingFake()
+    env.recycle_servers = lambda: False                          # attached mode: declines, no reset
+    env.calls.clear()
+    P.train(_args(["--total-steps", str(64 * 2), "--server-recycle-minutes", "1e-9"]), env, DetFake.OBS, None,
+            log=lambda *_: None)
+    assert env.calls == ["reset"]
+
+
+def test_recycle_retries_a_failing_start(monkeypatch):
+    monkeypatch.setattr("rl.vec_env.time.sleep", lambda s: None)
+    srv = _live(FakeServer(fail_starts=1))
+    vec = _OwnedServers(1, {"opponent": OppA}, [srv], worker=server_worker)
+    try:
+        assert vec.recycle_servers() is True and srv.start_calls == 2 and vec._kw[0]["port"] == srv.port
+        vec.reset()
+    finally:
+        vec.close()
+
+
+def test_recycle_gives_up_after_three_starts_and_close_is_clean(monkeypatch):
+    import time
+    monkeypatch.setattr("rl.vec_env.time.sleep", lambda s: None)
+    srv = _live(FakeServer(fail_starts=99))
+    vec = _OwnedServers(2, {"opponent": OppA}, [srv], worker=server_worker)
+    with pytest.raises(RuntimeError, match="cannot start"):
+        vec.recycle_servers()
+    assert srv.start_calls == 3 and vec.recycles == 0
+    t = time.time()
+    vec.close()
+    assert time.time() - t < 10 and all(p is None or not p.is_alive() for p in vec._procs)
+
+
+def test_resume_restores_server_recycles(tmp_path):
+    import json
+    run = tmp_path / "run"
+    run.mkdir()
+    env1 = RecyclingFake()
+    P.train(_args(["--total-steps", str(64 * 4), "--server-recycle-minutes", "1e-9"]), env1, DetFake.OBS, run,
+            log=lambda *_: None, stop_after=2)
+    ck = P.load_resume_state(run, DetFake.OBS)
+    assert ck["train_state"]["server_recycles"] == 1          # after update 1; none after the stop at update 2
+    env2 = RecyclingFake()
+    P.train(_args(["--total-steps", str(64 * 4), "--server-recycle-minutes", "1e-9"]), env2, DetFake.OBS, run,
+            log=lambda *_: None, resume=ck)
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    assert [r["server_recycles"] for r in rows] == [0, 1, 1, 2]
+    old = {k: v for k, v in ck["train_state"].items() if k != "server_recycles"}
+    P.train(_args(["--total-steps", str(64 * 4)]), RecyclingFake(), DetFake.OBS, None, log=lambda *_: None,
+            resume=dict(ck, train_state=old))                  # an old checkpoint still loads

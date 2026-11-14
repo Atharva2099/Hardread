@@ -382,6 +382,13 @@ def build_parser() -> argparse.ArgumentParser:
     # Machine knobs (they change speed, not learning).  One Node Showdown server is single-threaded
     # and tops out around 650 decisions/s however many envs share it; spread envs over several.
     p.add_argument("--n-servers", type=int, default=1, help="Showdown servers shared by the envs")
+    p.add_argument("--server-recycle-minutes", type=float, default=30.0,
+                   help="restart the owned Showdown servers between updates every N minutes (they leak "
+                        "memory and slow down); 0 = off")
+    p.add_argument("--server-recycle-rss-mb", type=float, default=0.0,
+                   help="also recycle when the servers' total RSS exceeds this many MB; 0 = off. The RSS sum "
+                        "counts pages shared between forked simulator processes more than once, so it is "
+                        "a relative threshold, not true memory use")
     # The nets are tiny: extra torch threads only fight the env workers for cores.
     p.add_argument("--torch-threads", type=int, default=1, help="torch.set_num_threads for the learner")
     p.add_argument("--resume", default=None, metavar="RUN_DIR",
@@ -397,7 +404,8 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 # Options that may be changed when resuming (everything else comes from the checkpoint's args).
-RESUME_OVERRIDABLE = ("stall_timeout", "max_aborts", "save_every", "ckpt_every", "n_servers", "torch_threads")
+RESUME_OVERRIDABLE = ("stall_timeout", "max_aborts", "save_every", "ckpt_every", "n_servers", "torch_threads",
+                     "server_recycle_minutes", "server_recycle_rss_mb")
 
 
 PHASE_NAMES = ["RandomPlayer", "MaxBasePowerPlayer", "SimpleHeuristicsPlayer"]
@@ -500,6 +508,7 @@ def train(args, venv, obs_dim: int = OBS_DIM, run_dir: Optional[Path] = None, lo
     total_steps = total_eps = total_aborted = 0
     start_update, wall_offset = 1, 0.0
     last: dict = {}
+    n_recycles = 0
     events: List[dict] = []
     if resume is not None:
         ts = resume["train_state"]
@@ -508,6 +517,7 @@ def train(args, venv, obs_dim: int = OBS_DIM, run_dir: Optional[Path] = None, lo
         opt.load_state_dict(ts["optimizer"])
         total_steps, total_eps, total_aborted = ts["total_steps"], ts["total_episodes"], ts["total_aborted"]
         start_update, wall_offset, events = ts["update"] + 1, ts["wall_time"], list(ts["events"])
+        n_recycles = ts.get("server_recycles", 0)
         if curr is not None and ts["curriculum"] is not None:
             curr.load_state_dict(ts["curriculum"])
         set_rng_state(ts["rng"])  # after the nets are built (building them consumed RNG)
@@ -529,6 +539,11 @@ def train(args, venv, obs_dim: int = OBS_DIM, run_dir: Optional[Path] = None, lo
             events_f.flush()
             log(f"resumed at update {start_update - 1} (total_steps {total_steps}); continuing with update {start_update}")
     t0 = time.time()
+    recycle_min = getattr(args, "server_recycle_minutes", 30.0) or 0.0
+    recycle_rss = getattr(args, "server_recycle_rss_mb", 0.0) or 0.0
+    recycle_fn = getattr(venv, "recycle_servers", None)
+    rss_fn = getattr(venv, "server_rss_mb", None)
+    last_recycle = time.monotonic()
 
     def snapshot(update_no: int) -> dict:
         """The training state that goes into every checkpoint we write (see load_resume_state)."""
@@ -537,7 +552,7 @@ def train(args, venv, obs_dim: int = OBS_DIM, run_dir: Optional[Path] = None, lo
             "total_aborted": total_aborted, "wall_time": wall_offset + time.time() - t0,
             "optimizer": opt.state_dict(), "events": events, "assigned": assigned[:],
             "curriculum": curr.state_dict() if curr else None, "rng": rng_state(),
-            "num_updates": num_updates,
+            "num_updates": num_updates, "server_recycles": n_recycles,
         }}
 
     def save(name: str, update_no: int) -> None:
@@ -592,6 +607,7 @@ def train(args, venv, obs_dim: int = OBS_DIM, run_dir: Optional[Path] = None, lo
             "win_rate": float(np.mean(won)) if won else None,  # this update's games, all opponents
             "mean_ep_len": float(np.mean([e["steps"] for e in episodes])) if episodes else None,
             "n_invalid": int((~buf["valid"]).sum()), "n_aborted": len(aborted), "total_aborted": total_aborted,
+            "server_recycles": n_recycles,
             **stats,
         }
         if curr:
@@ -622,6 +638,33 @@ def train(args, venv, obs_dim: int = OBS_DIM, run_dir: Optional[Path] = None, lo
                 save("latest.pt", update_no)
         if stopping:
             break
+        # Planned server recycle: strictly between rollouts (this one's GAE already used its bootstrap
+        # value).  Games in flight are dropped: no outcome, not an episode, not an abort.  Opponents
+        # persist (vec_env keeps them).  Never after the final update.
+        if recycle_fn is not None and update_no < num_updates and (recycle_min > 0 or recycle_rss > 0):
+            reason, rss = None, None
+            if recycle_rss > 0 and rss_fn is not None:
+                rss = rss_fn()
+                if rss is not None and rss > recycle_rss:
+                    reason = "rss"
+            if reason is None and recycle_min > 0 and time.monotonic() - last_recycle >= recycle_min * 60:
+                reason = "time"
+            if reason is not None:
+                t_rc = time.monotonic()
+                if rss is None and rss_fn is not None:
+                    rss = rss_fn()
+                if recycle_fn():
+                    n_recycles += 1
+                    state = new_collector_state(venv)
+                    last_recycle = time.monotonic()
+                    secs = last_recycle - t_rc
+                    if events_f:
+                        events_f.write(json.dumps({"event": "server_recycle", "update": update_no,
+                                                   "total_steps": total_steps, "reason": reason,
+                                                   "rss_mb": rss, "seconds": secs, "time": time.time()}) + "\n")
+                        events_f.flush()
+                    log(f"*** recycled Showdown servers after update {update_no} ({reason}"
+                        + (f", rss {rss:.0f} MB" if rss is not None else "") + f"); took {secs:.1f}s")
     for f in (metrics_f, episodes_f, events_f):
         if f:
             f.close()

@@ -75,6 +75,7 @@ randbats sets, and does it *use* that knowledge in play?
 - **E3:** opponents: fixed bots vs self-play vs a league (past selves + bots).
 - **E4:** episode: no turn cap vs the 30-step cap (Phase 0: the cap truncates most games).
 - **E5:** action space: flat vs factored.
+- **E6:** pre-computed type features. obs v1 gives the agent move effectiveness (move block [1]) and, for each switch-in, the danger it faces and the best hit it can deal (switch block [27], [28]). Variants: all on, all off (types only, so the type chart must be learned), moves only. The information is public, but handing it over pre-computed is a design choice. It also confounds the benchmark's effectiveness and switch-quality diagnostics, which measure close to the same quantities.
 
 ## Algorithms / scaling
 
@@ -83,6 +84,8 @@ randbats sets, and does it *use* that knowledge in play?
 - **A3:** simulator throughput: drive Showdown's simulator directly (`BattleStream`) instead of the websocket server, on a many-core GCP VM. This decides whether large-scale self-play is affordable.
 - **A4:** carry over the TCG search → distillation / expert-iteration idea (branch `tcg/search-distill-and-data-audit`).
 - **A5:** LLM + search (PokéChamp-style minimax with the LLM proposing and evaluating moves).
+- **A6:** PPO hyperparameter and network sweep. The current values are CleanRL defaults plus a gut-feel width of 128, never ablated here. Sweep width (128/256/512), shared vs separate trunk, tanh vs ReLU, ent_coef, num_steps, and the curriculum threshold and anti-forgetting fraction. Screen at about 2M steps, 3 seeds each, then confirm the winners at 10M.
+- **A7:** policy/value net + search at inference. Use the Showdown sim as the forward model, sample the opponent's hidden sets (determinization), let the policy prune and the value net evaluate the leaves. Later, distill the search back into the net (expert iteration, see A4).
 
 ## Data
 
