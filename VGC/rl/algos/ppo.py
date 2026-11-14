@@ -379,6 +379,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="seconds without a decision before a game counts as stuck (it is then aborted)")
     p.add_argument("--max-aborts", type=int, default=20,
                    help="aborted games in a row in one env worker before the run fails")
+    # Machine knobs (they change speed, not learning).  One Node Showdown server is single-threaded
+    # and tops out around 650 decisions/s however many envs share it; spread envs over several.
+    p.add_argument("--n-servers", type=int, default=1, help="Showdown servers shared by the envs")
+    # The nets are tiny: extra torch threads only fight the env workers for cores.
+    p.add_argument("--torch-threads", type=int, default=1, help="torch.set_num_threads for the learner")
     p.add_argument("--resume", default=None, metavar="RUN_DIR",
                    help="continue the run in RUN_DIR from its latest.pt (saved args win, except "
                         "--stall-timeout/--max-aborts/--save-every/--ckpt-every if given)")
@@ -392,7 +397,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 # Options that may be changed when resuming (everything else comes from the checkpoint's args).
-RESUME_OVERRIDABLE = ("stall_timeout", "max_aborts", "save_every", "ckpt_every")
+RESUME_OVERRIDABLE = ("stall_timeout", "max_aborts", "save_every", "ckpt_every", "n_servers", "torch_threads")
 
 
 PHASE_NAMES = ["RandomPlayer", "MaxBasePowerPlayer", "SimpleHeuristicsPlayer"]
@@ -659,8 +664,9 @@ def main(argv=None) -> None:
     classes.setdefault(args.opponent, getattr(pp, args.opponent))
     first = classes[PHASE_NAMES[0]] if args.curriculum else classes[args.opponent]
     print(f"run dir: {run_dir}" + (f" (resuming from update {resume['train_state']['update']})" if resume else ""))
+    torch.set_num_threads(getattr(args, "torch_threads", 1))
     with make_vec_env(args.n_envs, opponents=[first] * args.n_envs, timeout_s=args.stall_timeout,
-                      max_aborts=args.max_aborts) as venv:
+                      max_aborts=args.max_aborts, n_servers=getattr(args, "n_servers", 1)) as venv:
         train(args, venv, OBS_DIM, run_dir, opponent_classes=classes, resume=resume)
 
 
