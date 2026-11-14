@@ -18,6 +18,9 @@ dependencies = [
 server = "env.server.app:main"
 
 [project.optional-dependencies]
+# Stage 1+ (RL): torch for the networks; gymnasium for the env API (poke-env already pulls
+# in gymnasium and pettingzoo, so those need no extra pin).
+rl = ["torch>=2.3", "gymnasium>=1.0"]
 bench = ["pyyaml>=6", "matplotlib>=3.7", "scipy>=1.10"]
 dev = [
   "pytest>=7.0.0",
