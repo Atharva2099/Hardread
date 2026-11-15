@@ -85,6 +85,7 @@ randbats sets, and does it *use* that knowledge in play?
 - **A4:** carry over the TCG search → distillation / expert-iteration idea (branch `tcg/search-distill-and-data-audit`).
 - **A5:** LLM + search (PokéChamp-style minimax with the LLM proposing and evaluating moves).
 - **A6:** PPO hyperparameter and network sweep. The current values are CleanRL defaults plus a gut-feel width of 128, never ablated here. Sweep width (128/256/512), shared vs separate trunk, tanh vs ReLU, ent_coef, num_steps, and the curriculum threshold and anti-forgetting fraction. Screen at about 2M steps, 3 seeds each, then confirm the winners at 10M.
+  - **Stage 1, width (`done` 2026-11-15):** 3M steps × 3 seeds. Elo 128 → 1541, 256 → 1577, 512 → 1576. 256 − 128 = +35 [+1, +72] (two-level bootstrap); 512 ≈ 256 and 20% slower. Wider nets clear the curriculum about twice as fast. **New default: `--hidden 256`.** Not yet confirmed at 10M. Results: `outputs/rl/a6/summary.json`; script: `rl/sweeps/analyse_a6_width.py`.
 - **A7:** policy/value net + search at inference. Use the Showdown sim as the forward model, sample the opponent's hidden sets (determinization), let the policy prune and the value net evaluate the leaves. Later, distill the search back into the net (expert iteration, see A4).
 
 ## Data

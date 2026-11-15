@@ -193,8 +193,8 @@ def test_train_switches_opponents_with_fake_venv():
 
 # ---------------------------------------------------------------- 5. checkpoint -> benchmark loader
 def test_checkpoint_loads_in_benchmark_and_matches_actor(tmp_path):
-    actor, critic = P.make_networks(OBS_DIM, 128)
     args = P.parse_args([])
+    actor, critic = P.make_networks(OBS_DIM, args.hidden)
     P.save_checkpoint(tmp_path / "latest.pt", actor, critic, args, OBS_DIM, 3)
     ck = torch.load(tmp_path / "latest.pt", weights_only=False)
     assert ck["algo"] == "ppo" and "critic_state_dict" in ck and "policy_state_dict" in ck
@@ -209,3 +209,119 @@ def test_checkpoint_loads_in_benchmark_and_matches_actor(tmp_path):
     obs = x[0].numpy()
     assert fn is not None
     assert fn(obs, mask) == int(actor(x[:1]).argmax())
+
+
+# ---------------------------------------------------------------- 6. A6 stage 2: activation / shared trunk
+VARIANTS = [(act, shared) for act in ("tanh", "relu") for shared in (False, True)]
+
+
+def _variant_flags(act, shared):
+    return ["--activation", act, "--shared-trunk" if shared else "--no-shared-trunk"]
+
+
+def test_default_networks_identical_to_previous_construction():
+    args = P.parse_args([])
+    assert args.activation == "tanh" and args.shared_trunk is False
+    torch.manual_seed(5)
+    actor, critic = P.make_networks(OBS_DIM, args.hidden, args.activation, args.shared_trunk)
+    torch.manual_seed(5)  # the pre-change make_networks, verbatim
+    old_a = P.init_orthogonal(R.PolicyNet(OBS_DIM, 9, args.hidden), 0.01)
+    old_c = P.init_orthogonal(R.ValueNet(OBS_DIM, args.hidden), 1.0)
+    for new, old in ((actor, old_a), (critic, old_c)):
+        sn, so = new.state_dict(), old.state_dict()
+        assert list(sn) == list(so)
+        assert all(torch.equal(sn[k], so[k]) for k in sn)
+    ps = P.unique_params(actor, critic)
+    assert len(ps) == len(list(actor.parameters())) + len(list(critic.parameters()))
+    assert all(a is b for a, b in zip(ps, list(actor.parameters()) + list(critic.parameters())))
+
+
+def test_shared_trunk_params_and_optimizer_have_no_duplicates():
+    actor, critic = P.make_networks(OBS_DIM, 16, "relu", True)
+    assert actor.net[0] is critic.trunk[0] and actor.net[2] is critic.trunk[2]
+    assert actor.net[0].weight is critic.trunk[0].weight
+    ps = P.unique_params(actor, critic)
+    assert len({id(p) for p in ps}) == len(ps)
+    assert len(ps) == 6 + 2  # trunk 2 Linear (4) + actor head (2) + critic head (2)
+    opt = torch.optim.Adam(ps, lr=1e-3)
+    flat = [p for g in opt.param_groups for p in g["params"]]
+    assert len(flat) == len({id(p) for p in flat}) == len(ps)
+    # a value-loss-only step moves the trunk in shared mode
+    before = actor.net[0].weight.detach().clone()
+    critic(torch.randn(5, OBS_DIM)).pow(2).mean().backward()
+    opt.step()
+    assert not torch.equal(before, actor.net[0].weight)
+
+
+@pytest.mark.parametrize("act,shared", VARIANTS)
+def test_variant_checkpoint_loads_in_benchmark_and_matches_actor(tmp_path, act, shared):
+    args = P.parse_args(["--hidden", "24", *_variant_flags(act, shared)])
+    actor, critic = P.make_networks(OBS_DIM, args.hidden, act, shared)
+    with torch.no_grad():  # make heads non-trivial so the equality check is meaningful
+        for p in actor.parameters():
+            p.add_(0.1 * torch.randn_like(p))
+    path = tmp_path / "latest.pt"
+    P.save_checkpoint(path, actor, critic, args, OBS_DIM, 3)
+    ck = torch.load(path, weights_only=False)
+    assert ck["arch"] == {"hidden": 24, "n_actions": 9, "activation": act, "shared_trunk": shared}
+    x = torch.randn(6, OBS_DIM)
+    assert torch.equal(actor(x), R.load_policy(path)(x))
+
+    from rl.benchmark import rl_resolver
+    fn = rl_resolver(f"ckpt:{path}:greedy").kwargs["policy"]
+    assert fn(x[0].numpy(), np.ones(9, bool)) == int(actor(x[:1]).argmax())
+
+
+def test_old_format_checkpoint_without_activation_keys_still_loads(tmp_path):
+    args = P.parse_args(["--hidden", "16"])
+    actor, critic = P.make_networks(OBS_DIM, 16)
+    path = tmp_path / "old.pt"
+    P.save_checkpoint(path, actor, critic, args, OBS_DIM, 1)
+    ck = torch.load(path, weights_only=False)
+    ck["arch"] = {"hidden": 16, "n_actions": 9}
+    torch.save(ck, path)
+    x = torch.randn(4, OBS_DIM)
+    assert torch.equal(actor(x), R.load_policy(path)(x))
+
+
+@pytest.mark.parametrize("act,shared", [("relu", True), ("relu", False), ("tanh", True)])
+def test_resume_roundtrip_restores_actor_and_critic(tmp_path, act, shared):
+    run = tmp_path / "run"
+    run.mkdir()
+    args = _ppo_args(["--total-steps", str(4 * 64 * 2), *_variant_flags(act, shared)])
+    a = P.train(args, FakeVecEnv(), FakeVecEnv.OBS, run, log=lambda *_: None)
+    ck = P.load_resume_state(run, FakeVecEnv.OBS)
+    b = P.train(args, FakeVecEnv(), FakeVecEnv.OBS, run, log=lambda *_: None, resume=ck)  # nothing left to run
+    x = torch.randn(7, FakeVecEnv.OBS)
+    assert torch.equal(a["actor"](x), b["actor"](x)) and torch.equal(a["critic"](x), b["critic"](x))
+    if shared:
+        assert b["actor"].net[0] is b["critic"].trunk[0] and b["actor"].net[2] is b["critic"].trunk[2]
+        assert torch.equal(b["actor"].net[0].weight, b["critic"].trunk[0].weight)
+    ps = P.unique_params(b["actor"], b["critic"])
+    assert len(ps) == (8 if shared else 12)
+
+
+@pytest.mark.parametrize("act,shared", VARIANTS)
+def test_dead_relu_metric_only_for_relu(tmp_path, act, shared):
+    run = tmp_path / "run"
+    run.mkdir()
+    args = _ppo_args(["--total-steps", str(4 * 64 * 2), *_variant_flags(act, shared)])
+    P.train(args, FakeVecEnv(), FakeVecEnv.OBS, run, log=lambda *_: None)
+    import json
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    assert len(rows) == 2
+    for r in rows:
+        if act == "relu":
+            assert 0.0 <= r["dead_relu_frac"] <= 1.0
+        else:
+            assert r.get("dead_relu_frac") is None
+
+
+def test_dead_relu_frac_counts_units_dead_on_whole_batch():
+    actor, critic = P.make_networks(OBS_DIM, 4, "relu", False)
+    with torch.no_grad():
+        actor.net[0].bias.copy_(torch.tensor([-1e6, 1e6, 1e6, 1e6]))  # unit 0 of layer 1 always dead
+        critic.net[0].bias.fill_(1e6)                                   # critic layer 1: all alive
+    obs = torch.randn(10, OBS_DIM)
+    f = P.dead_relu_frac(actor, critic, obs, False)
+    assert 0.25 / 4 - 1e-9 <= f <= 1.0  # >= 1 dead unit (1/4 of one layer) averaged over the 4 hidden layers

@@ -37,7 +37,7 @@ import torch
 import torch.nn as nn
 
 # Reuse everything shared with REINFORCE (same networks, same masking, same checkpoint format).
-from rl.algos.reinforce import (DEVICE, PolicyNet, ValueNet, git_short_sha, masked_dist,
+from rl.algos.reinforce import (ACTIVATIONS, DEVICE, PolicyNet, ValueNet, git_short_sha, masked_dist,
                                 save_checkpoint as _save_checkpoint)
 from rl.actions import N_ACTIONS
 from rl.obs import OBS_DIM, OBS_VERSION
@@ -63,11 +63,64 @@ def init_orthogonal(net: nn.Module, out_std: float) -> nn.Module:
     return net
 
 
-def make_networks(obs_dim: int, hidden: int):
-    """Separate actor and critic (no shared layers), as in REINFORCE."""
-    actor = init_orthogonal(PolicyNet(obs_dim, N_ACTIONS, hidden), 0.01).to(DEVICE)
-    critic = init_orthogonal(ValueNet(obs_dim, hidden), 1.0).to(DEVICE)
+class SharedCritic(nn.Module):
+    """V(s) = head(trunk(obs)), where the trunk is the ACTOR's first two Linear layers (the very same
+    module objects, not copies), so actor and critic share those weights."""
+
+    def __init__(self, actor: PolicyNet, activation: str):
+        super().__init__()
+        act = ACTIVATIONS[activation]
+        self.trunk = nn.Sequential(actor.net[0], act(), actor.net[2], act())
+        self.head = nn.Linear(actor.net[2].out_features, 1)
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.head(self.trunk(obs)).squeeze(-1)
+
+
+def make_networks(obs_dim: int, hidden: int, activation: str = "tanh", shared_trunk: bool = False):
+    """Actor and critic.  Default: separate networks (no shared layers), as in REINFORCE.
+
+    shared_trunk=True: one trunk Linear(obs,h)-act-Linear(h,h)-act feeds both an actor head (h -> 9)
+    and a critic head (h -> 1).  The actor is an ordinary PolicyNet (so its state_dict has the usual
+    net.0 / net.2 / net.4 keys and rl.algos.reinforce.load_policy loads it unchanged); the critic
+    borrows the actor's first two Linear layers.  Init, in this fixed order: the actor is initialised
+    as usual (trunk gain sqrt(2), head 0.01, zero biases); the critic head is then initialised on its
+    own (gain 1.0, zero bias).  The trunk is therefore initialised exactly once."""
+    actor = init_orthogonal(PolicyNet(obs_dim, N_ACTIONS, hidden, activation), 0.01).to(DEVICE)
+    if not shared_trunk:
+        critic = init_orthogonal(ValueNet(obs_dim, hidden, activation), 1.0).to(DEVICE)
+    else:
+        critic = SharedCritic(actor, activation).to(DEVICE)
+        nn.init.orthogonal_(critic.head.weight, 1.0)
+        nn.init.zeros_(critic.head.bias)
     return actor, critic
+
+
+def unique_params(*nets: nn.Module) -> List[nn.Parameter]:
+    """All parameters of `nets`, each exactly once (by identity), in first-seen order.  For separate
+    networks this is exactly list(actor.parameters()) + list(critic.parameters())."""
+    seen, out = set(), []
+    for net in nets:
+        for p in net.parameters():
+            if id(p) not in seen:
+                seen.add(id(p))
+                out.append(p)
+    return out
+
+
+@torch.no_grad()
+def dead_relu_frac(actor, critic, obs: torch.Tensor, shared_trunk: bool) -> float:
+    """Mean over hidden ReLU layers of the fraction of units that output 0 for EVERY sample in `obs`.
+    Layers: the actor's two hidden layers (= the trunk when shared) and, when separate, the critic's."""
+    nets = [actor.net] if shared_trunk else [actor.net, critic.net]
+    fracs = []
+    for seq in nets:
+        x = obs
+        for layer in list(seq)[:-1]:  # everything before the output Linear
+            x = layer(x)
+            if isinstance(layer, nn.ReLU):
+                fracs.append(float((x <= 0).all(dim=0).float().mean()))
+    return float(np.mean(fracs))
 
 
 # =============================================================================================
@@ -229,8 +282,10 @@ def ppo_loss(actor, critic, mb: dict, args) -> tuple:
     value_loss = wmean(v_loss_el, valid)
     ent = wmean(entropy, valid)
 
-    # One loss, one optimiser over actor + critic.  The nets share no parameters, so the two
-    # gradients do not interfere; vf_coef only sets the relative size within the clipped grad norm.
+    # One loss, one optimiser over actor + critic.  Separate nets (default) share no parameters, so the
+    # two gradients do not interfere and vf_coef only sets the relative size within the clipped grad
+    # norm.  With --shared-trunk the value loss also trains the shared layers, so vf_coef then also
+    # decides how strongly the critic shapes the features the policy uses.
     loss = policy_loss - args.ent_coef * ent + args.vf_coef * value_loss
 
     with torch.no_grad():
@@ -270,7 +325,7 @@ def update(actor, critic, opt, buf: dict, adv, ret, args) -> dict:
             opt.zero_grad()
             loss.backward()
             stats["grad_norm"] = float(nn.utils.clip_grad_norm_(
-                list(actor.parameters()) + list(critic.parameters()), args.max_grad_norm))
+                unique_params(actor, critic), args.max_grad_norm))  # shared trunk counted once
             opt.step()
             for k, x in stats.items():
                 agg.setdefault(k, []).append(x)
@@ -366,7 +421,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-grad-norm", type=float, default=0.5)
     p.add_argument("--lr", type=float, default=2.5e-4)
     p.add_argument("--no-anneal-lr", dest="anneal_lr", action="store_false", help="constant learning rate")
-    p.add_argument("--hidden", type=int, default=128)
+    p.add_argument("--hidden", type=int, default=256,
+                   help="hidden units per layer (A6 stage 1, 2026-11-15: 256 beat 128 by ~35 Elo at 3M; 512 no better)")
+    p.add_argument("--activation", choices=sorted(ACTIVATIONS), default="tanh",
+                   help="hidden-layer activation (A6 stage 2)")
+    p.add_argument("--shared-trunk", action=argparse.BooleanOptionalAction, default=False,
+                   help="actor and critic share both hidden layers (value loss then also trains the trunk)")
     p.add_argument("--curriculum", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--opponent", default="RandomPlayer", help="fixed opponent when --no-curriculum")
     p.add_argument("--curr-threshold", type=float, default=0.70)
@@ -485,9 +545,12 @@ def train(args, venv, obs_dim: int = OBS_DIM, run_dir: Optional[Path] = None, lo
     np.random.seed(args.seed)
     random.seed(args.seed)
 
-    actor, critic = make_networks(obs_dim, args.hidden)
-    # ONE optimiser over both nets, as in CleanRL (eps=1e-5 as there).
-    opt = torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=args.lr, eps=1e-5)
+    activation = getattr(args, "activation", "tanh")
+    shared_trunk = bool(getattr(args, "shared_trunk", False))
+    actor, critic = make_networks(obs_dim, args.hidden, activation, shared_trunk)
+    # ONE optimiser over both nets, as in CleanRL (eps=1e-5 as there).  Each parameter once: with a
+    # shared trunk the value loss also updates the trunk (intended; vf_coef 0.5 weights it).
+    opt = torch.optim.Adam(unique_params(actor, critic), lr=args.lr, eps=1e-5)
 
     batch_size = args.n_envs * args.num_steps
     num_updates = max(1, args.total_steps // batch_size)  # from the ORIGINAL total_steps, also on resume
@@ -575,6 +638,10 @@ def train(args, venv, obs_dim: int = OBS_DIM, run_dir: Optional[Path] = None, lo
             next_value = critic(torch.as_tensor(state["obs"], dtype=torch.float32, device=DEVICE))
             adv, ret = compute_gae(buf["rew"], buf["done"], buf["val"], next_value, args.gamma, args.gae_lambda)
         stats = update(actor, critic, opt, buf, adv, ret, args)
+        if activation == "relu":  # cheap diagnostic: one no-grad forward over the rollout's valid obs
+            vobs = buf["obs"][buf["valid"]]
+            if len(vobs):
+                stats["dead_relu_frac"] = dead_relu_frac(actor, critic, vobs, shared_trunk)
 
         total_steps += batch_size
         total_eps += len(episodes)
@@ -689,6 +756,11 @@ def main(argv=None) -> None:
         probe = build_parser()
         probe.set_defaults(**{k: sentinel for k in vars(args)})
         given = {k for k, v in vars(probe.parse_args(argv)).items() if v is not sentinel}
+        # Architecture options missing from an older checkpoint mean the architecture it was trained
+        # with (tanh, separate nets), never this command line's flags: those would build a different net.
+        for k, old in (("activation", "tanh"), ("shared_trunk", False)):
+            if k not in vars(saved):
+                setattr(saved, k, old)
         for k, v in vars(args).items():
             if k not in vars(saved):
                 setattr(saved, k, v)

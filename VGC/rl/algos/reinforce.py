@@ -44,27 +44,35 @@ MASK_VALUE = -1e9
 # =============================================================================================
 # 1. Networks
 # =============================================================================================
-def mlp(sizes: List[int]) -> nn.Sequential:
-    """Linear -> tanh -> Linear -> tanh -> ... -> Linear (no activation on the output).
+ACTIVATIONS = {"tanh": nn.Tanh, "relu": nn.ReLU}
 
-    tanh rather than ReLU: observations are already scaled to about [-1, 1], tanh keeps
-    activations bounded (so one weird state cannot produce a huge logit), and it is the classic
-    choice for small policy-gradient nets.  ReLU would work too.
+
+def mlp(sizes: List[int], activation: str = "tanh") -> nn.Sequential:
+    """Linear -> act -> Linear -> act -> ... -> Linear (no activation on the output).
+
+    `activation` is "tanh" (default) or "relu".  tanh is the default because observations are
+    already scaled to about [-1, 1], tanh keeps activations bounded (so one weird state cannot
+    produce a huge logit), and it is the classic choice for small policy-gradient nets.  ReLU is
+    offered for the PPO architecture study (A6); the layer layout (and so the state_dict keys) is
+    the same for both.
     """
+    if activation not in ACTIVATIONS:
+        raise ValueError(f"unknown activation {activation!r}; expected one of {sorted(ACTIVATIONS)}")
     layers: List[nn.Module] = []
     for i in range(len(sizes) - 1):
         layers.append(nn.Linear(sizes[i], sizes[i + 1]))
         if i < len(sizes) - 2:
-            layers.append(nn.Tanh())
+            layers.append(ACTIVATIONS[activation]())
     return nn.Sequential(*layers)
 
 
 class PolicyNet(nn.Module):
     """obs -> 9 logits (one score per action; softmax of the logits = the policy pi(a|s))."""
 
-    def __init__(self, obs_dim: int = OBS_DIM, n_actions: int = N_ACTIONS, hidden: int = 128):
+    def __init__(self, obs_dim: int = OBS_DIM, n_actions: int = N_ACTIONS, hidden: int = 128,
+                 activation: str = "tanh"):
         super().__init__()
-        self.net = mlp([obs_dim, hidden, hidden, n_actions])
+        self.net = mlp([obs_dim, hidden, hidden, n_actions], activation)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.net(obs)
@@ -74,9 +82,9 @@ class ValueNet(nn.Module):
     """obs -> V(s): a single number, our estimate of the return G from this state.
     A separate network (no shared layers) so the baseline's learning can never disturb the policy."""
 
-    def __init__(self, obs_dim: int = OBS_DIM, hidden: int = 128):
+    def __init__(self, obs_dim: int = OBS_DIM, hidden: int = 128, activation: str = "tanh"):
         super().__init__()
-        self.net = mlp([obs_dim, hidden, hidden, 1])
+        self.net = mlp([obs_dim, hidden, hidden, 1], activation)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.net(obs).squeeze(-1)
@@ -261,7 +269,8 @@ def save_checkpoint(path: Path, policy: PolicyNet, args, obs_dim: int, update_no
         "policy_state_dict": policy.state_dict(),
         "obs_version": OBS_VERSION,
         "obs_dim": obs_dim,
-        "arch": {"hidden": args.hidden, "n_actions": N_ACTIONS, "activation": "tanh"},
+        "arch": {"hidden": args.hidden, "n_actions": N_ACTIONS, "activation": getattr(args, "activation", "tanh"),
+                 "shared_trunk": bool(getattr(args, "shared_trunk", False))},
         "args": vars(args),
         "update": update_no,
     }, path)
@@ -344,7 +353,10 @@ def load_policy(path) -> PolicyNet:
     if ckpt["obs_version"] != OBS_VERSION or ckpt["obs_dim"] != OBS_DIM:
         raise ValueError(f"checkpoint {path} was trained on observation {ckpt['obs_version']} "
                          f"(dim {ckpt['obs_dim']}); this code has {OBS_VERSION} (dim {OBS_DIM})")
-    net = PolicyNet(ckpt["obs_dim"], ckpt["arch"]["n_actions"], ckpt["arch"]["hidden"])
+    arch = ckpt["arch"]
+    # Shared-trunk PPO checkpoints store the actor as an ordinary PolicyNet state_dict (see ppo.py),
+    # so the same loader works; old checkpoints have no "activation" key and are tanh.
+    net = PolicyNet(ckpt["obs_dim"], arch["n_actions"], arch["hidden"], arch.get("activation", "tanh"))
     net.load_state_dict(ckpt["policy_state_dict"])
     return net.eval()
 

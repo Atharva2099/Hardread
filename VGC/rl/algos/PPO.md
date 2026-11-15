@@ -32,6 +32,21 @@
   terminal step (win, loss, tie, or 300-turn cap) uses next value 0 and cuts the GAE chain. Only games
   still running when the rollout ends are bootstrapped from V(next_obs).
 
+## Architecture options (A6 stage 2)
+
+Default: separate actor and critic, each `obs -> 256 -> 256 -> out` with tanh, orthogonal init.
+
+* `--activation {tanh,relu}`: hidden activation (same layer layout either way).
+* `--shared-trunk`: one trunk (`Linear-act-Linear-act`) feeds an actor head (256 -> 9) and a critic head
+  (256 -> 1). The value loss (weight `vf_coef` 0.5) then also trains the trunk. Init: trunk gain sqrt(2),
+  actor head 0.01, critic head 1.0, zero biases. Each parameter is given to Adam and to grad-norm clipping once.
+* With `relu`, each metrics row has `dead_relu_frac`: mean over hidden layers of the share of units that output 0
+  for every state of the rollout (a unit that is dead on the whole batch gets no gradient). Absent for tanh.
+* Checkpoints record `arch = {hidden, n_actions, activation, shared_trunk}`. The actor is always stored as a plain
+  PolicyNet state_dict (`net.0/2/4`), so the benchmark loader needs no change; in shared mode the critic's
+  `trunk.0/2` entries duplicate the actor's trunk and are loaded back into the single shared module on resume.
+  Old checkpoints (no `activation`) load as tanh. The architecture is fixed by the checkpoint on `--resume`.
+
 ## Metrics and healthy ranges
 
 | metric | meaning | healthy |
